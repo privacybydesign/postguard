@@ -115,6 +115,6 @@ JWT. Everything after that is the published SDK's own code.
 
 The alternative, stubbing the unsealer instead, would test the stub.
 
-[#247]: https://github.com/encryption4all/postguard/issues/247
-[#251]: https://github.com/encryption4all/postguard/issues/251
-[#261]: https://github.com/encryption4all/postguard/issues/261
+[#247]: https://github.com/privacybydesign/postguard/issues/247
+[#251]: https://github.com/privacybydesign/postguard/issues/251
+[#261]: https://github.com/privacybydesign/postguard/issues/261

@@ -212,9 +212,9 @@ pg-core 0.6.5: mem: reader died on signal 6 before it could report: memory alloc
 A `VERSION_V3` bump is the one break reported before any ciphertext is touched,
 once per reader rather than once per case.
 
-[#247]: https://github.com/encryption4all/postguard/issues/247
-[#251]: https://github.com/encryption4all/postguard/issues/251
-[#252]: https://github.com/encryption4all/postguard/issues/252
-[#260]: https://github.com/encryption4all/postguard/issues/260
-[#261]: https://github.com/encryption4all/postguard/issues/261
-[#268]: https://github.com/encryption4all/postguard/issues/268
+[#247]: https://github.com/privacybydesign/postguard/issues/247
+[#251]: https://github.com/privacybydesign/postguard/issues/251
+[#252]: https://github.com/privacybydesign/postguard/issues/252
+[#260]: https://github.com/privacybydesign/postguard/issues/260
+[#261]: https://github.com/privacybydesign/postguard/issues/261
+[#268]: https://github.com/privacybydesign/postguard/issues/268

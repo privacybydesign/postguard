@@ -1,0 +1,62 @@
+# Updates are grouped (one PR per ecosystem, plus one for its security
+# updates) and wait 7 days after a release (cooldown) so compromised releases
+# are usually yanked before they reach us. Security updates are not delayed.
+#
+# The two `ignore` lists are load-bearing and pg-core/tests/dependabot_config.rs
+# pins them. pg-compat and pg-compat-js are the wire-compat gate's published
+# readers: `=`-exact, aliased pins on released pg-core, @e4a/pg-wasm and
+# @e4a/pg-js versions, moved deliberately under the one-pin-per-minor-line rule
+# (no_two_pinned_readers_share_a_minor_line in pg-compat/tests/support_window.rs).
+# A routine bump there would silently move what HEAD is checked against.
+# postguard-e2e's check-reader-rows.mjs watches their currency instead. Each
+# list names the packages and the aliases they are installed under.
+version: 2
+updates:
+  - package-ecosystem: github-actions # also bumps the shared workflows
+    directories: ["/", "/.github/actions/*"]
+    schedule: { interval: weekly, day: monday }
+    groups:
+      actions: { patterns: ["*"] }
+      actions-security: { applies-to: security-updates, patterns: ["*"] }
+    cooldown: { default-days: 7 }
+
+  - package-ecosystem: docker # bumps tag AND @sha256 digest of FROM lines
+    directories: ["/", "/cryptify"]
+    schedule: { interval: weekly, day: monday }
+    groups:
+      docker: { patterns: ["*"] }
+    cooldown: { default-days: 7 }
+
+  # The workspace, and pg-wasm, which the workspace excludes.
+  - package-ecosystem: cargo
+    directories: ["/", "/pg-wasm"]
+    schedule: { interval: weekly, day: monday }
+    groups:
+      cargo: { patterns: ["*"], update-types: [minor, patch] }
+      cargo-security: { applies-to: security-updates, patterns: ["*"] }
+    cooldown: { default-days: 7 }
+
+  # The Rust half of the wire-compat gate's readers.
+  - package-ecosystem: cargo
+    directory: /pg-compat
+    schedule: { interval: weekly, day: monday }
+    ignore:
+      - dependency-name: "pg-core"
+      - dependency-name: "pg-core-*"
+    groups:
+      pg-compat: { patterns: ["*"], update-types: [minor, patch] }
+      pg-compat-security: { applies-to: security-updates, patterns: ["*"] }
+    cooldown: { default-days: 7 }
+
+  # The JavaScript half of the wire-compat gate's readers.
+  - package-ecosystem: npm
+    directory: /pg-compat-js
+    schedule: { interval: weekly, day: monday }
+    ignore:
+      - dependency-name: "@e4a/*"
+      - dependency-name: "pg-js-*"
+      - dependency-name: "pg-wasm-*"
+    groups:
+      pg-compat-js: { patterns: ["*"], update-types: [minor, patch] }
+      pg-compat-js-security: { applies-to: security-updates, patterns: ["*"] }
+    cooldown: { default-days: 7 }

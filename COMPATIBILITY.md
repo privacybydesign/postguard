@@ -222,21 +222,21 @@ what can read.
 
 Skipping step 2 is how you break the consumers you cannot see.
 
-[#249]: https://github.com/encryption4all/postguard/issues/249
-[#257]: https://github.com/encryption4all/postguard/issues/257
-[#259]: https://github.com/encryption4all/postguard/issues/259
-[#260]: https://github.com/encryption4all/postguard/issues/260
-[#261]: https://github.com/encryption4all/postguard/issues/261
-[#262]: https://github.com/encryption4all/postguard/issues/262
-[#268]: https://github.com/encryption4all/postguard/issues/268
-[#272]: https://github.com/encryption4all/postguard/issues/272
-[postguard-js]: https://github.com/encryption4all/postguard-js
-[postguard-js#131]: https://github.com/encryption4all/postguard-js/issues/131
-[postguard-e2e]: https://github.com/encryption4all/postguard-e2e
-[postguard-e2e#19]: https://github.com/encryption4all/postguard-e2e/issues/19
-[postguard-e2e#21]: https://github.com/encryption4all/postguard-e2e/issues/21
-[postguard-e2e#25]: https://github.com/encryption4all/postguard-e2e/issues/25
-[postguard-e2e#41]: https://github.com/encryption4all/postguard-e2e/pull/41
+[#249]: https://github.com/privacybydesign/postguard/issues/249
+[#257]: https://github.com/privacybydesign/postguard/issues/257
+[#259]: https://github.com/privacybydesign/postguard/issues/259
+[#260]: https://github.com/privacybydesign/postguard/issues/260
+[#261]: https://github.com/privacybydesign/postguard/issues/261
+[#262]: https://github.com/privacybydesign/postguard/issues/262
+[#268]: https://github.com/privacybydesign/postguard/issues/268
+[#272]: https://github.com/privacybydesign/postguard/issues/272
+[postguard-js]: https://github.com/privacybydesign/postguard-js
+[postguard-js#131]: https://github.com/privacybydesign/postguard-js/issues/131
+[postguard-e2e]: https://github.com/privacybydesign/postguard-e2e
+[postguard-e2e#19]: https://github.com/privacybydesign/postguard-e2e/issues/19
+[postguard-e2e#21]: https://github.com/privacybydesign/postguard-e2e/issues/21
+[postguard-e2e#25]: https://github.com/privacybydesign/postguard-e2e/issues/25
+[postguard-e2e#41]: https://github.com/privacybydesign/postguard-e2e/pull/41
 [postguard-dotnet#50]: https://github.com/encryption4all/postguard-dotnet/issues/50
 [postguard-outlook-addon#125]: https://github.com/encryption4all/postguard-outlook-addon/issues/125
 [postguard-ops#71]: https://github.com/privacybydesign/postguard-ops/issues/71

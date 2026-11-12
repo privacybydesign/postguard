@@ -1,0 +1,32 @@
+# Weekly re-scan of the PUBLISHED images (all platforms) for new CVEs. The
+# scans in delivery.yml run when an image is built, so a CVE published after
+# that is seen here or not at all.
+name: Image rescan
+
+on:
+  schedule:
+    - cron: "23 6 * * 1" # Mondays
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  pkg:
+    uses: privacybydesign/github-workflows/.github/workflows/image-rescan.yml@v1
+    permissions:
+      contents: read
+      packages: read
+      security-events: write
+    with:
+      image-name: ghcr.io/privacybydesign/postguard
+      tags: edge
+
+  cryptify:
+    uses: privacybydesign/github-workflows/.github/workflows/image-rescan.yml@v1
+    permissions:
+      contents: read
+      packages: read
+      security-events: write
+    with:
+      image-name: ghcr.io/privacybydesign/cryptify
+      tags: edge

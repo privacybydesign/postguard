@@ -1,0 +1,62 @@
+# The engine behind .github/workflows/api-diff.yml.
+#
+# That workflow used `oasdiff/oasdiff-action/breaking@v0.1.10`. The
+# privacybydesign organization only runs GitHub-owned, verified and allowlisted
+# actions, and a workflow that names any other action does not start at all. A
+# local action is always allowed, so this one does what that action's
+# entrypoint did with the inputs the workflow sets, on the image that action
+# was built from: v0.1.10's Dockerfile is `FROM tufin/oasdiff:v1.26.1`.
+#
+# The image is pinned by digest because it is the gate's verdict: every verdict
+# pg-pkg/tests/api_gate.rs and cryptify's `mod api_gate_tests` pin was measured
+# against v1.26.1, and a bump with no re-measurement fails open. Both suites
+# read the reference below, so it cannot move without them.
+#
+# What is left out is the side-by-side review upload to oasdiff.com and the
+# pull-request comment that links to it. The workflow had that switched off
+# (`review: false`), so nothing the gate did is gone.
+name: API breaking changes
+description: Fails when an OpenAPI spec changed in a way oasdiff rates at or above `fail-on`.
+inputs:
+  base:
+    description: Path of the spec on the base branch, relative to the workspace.
+    required: true
+  revision:
+    description: Path of the pull request's spec, relative to the workspace.
+    required: true
+  fail-on:
+    description: Lowest severity that fails the step (WARN or ERR).
+    required: true
+  include-checks:
+    description: Comma-separated opt-in checks to run on top of the defaults.
+    required: true
+runs:
+  using: composite
+  steps:
+    - name: oasdiff breaking
+      shell: bash
+      env:
+        ENGINE: tufin/oasdiff:v1.26.1@sha256:aae8cfcf7d18d3b0ebce6bdf407623bf8788ca318c7a0440627aaf583ed3e9f4
+        BASE: ${{ inputs.base }}
+        REVISION: ${{ inputs.revision }}
+        FAIL_ON: ${{ inputs.fail-on }}
+        INCLUDE_CHECKS: ${{ inputs.include-checks }}
+      run: |
+        set -euo pipefail
+        # The flags the action's entrypoint built from these inputs and its
+        # defaults. The workspace is mounted read-only: the engine reads two
+        # files and writes nothing.
+        breaking() {
+          docker run --rm -v "$GITHUB_WORKSPACE:/workspace:ro" -w /workspace "$ENGINE" \
+            breaking "$BASE" "$REVISION" \
+            --allow-external-refs=false \
+            --include-checks "$INCLUDE_CHECKS" \
+            --composed=false \
+            "$@"
+        }
+        # Annotations on the pull request's changed lines. Never the verdict.
+        breaking --format githubactions || true
+        # The verdict: exit 0 is a clean diff, exit 1 is a change at or above
+        # FAIL_ON, anything else is the engine refusing its input. All three
+        # are this step's exit code.
+        breaking --fail-on "$FAIL_ON"

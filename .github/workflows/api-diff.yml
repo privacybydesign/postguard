@@ -69,6 +69,9 @@ name: API diff
 # that does not touch the spec pending forever. The job is two checkouts and one
 # container, so it just always runs.
 #
+# The two specs never leave CI: the local action does not have the upload to
+# oasdiff.com that the upstream action offered (and that this job switched off).
+#
 
 on:
   pull_request:
@@ -94,22 +97,23 @@ jobs:
           - cryptify/api-description.yaml
     steps:
       - name: Check out the pull request
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
           # The spec is all this job reads, and the oasdiff container gets the
           # workspace mounted; do not leave a push token in .git/config for it.
           persist-credentials: false
       - name: Check out the base spec
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
           ref: ${{ github.event.pull_request.base.sha }}
           path: base
           persist-credentials: false
       - name: Diff the spec against the base branch
-        # Pinned by sha because this step is the gate's verdict. The tag pins
-        # the engine: v0.1.10 is FROM tufin/oasdiff:v1.26.1, so a local
-        # `oasdiff v1.26.1` reproduces what CI decides here.
-        uses: oasdiff/oasdiff-action/breaking@0ab8ad204b00d25acc5ae87106281433e288d0c1 # v0.1.10
+        # A local action, because the organization does not run
+        # oasdiff/oasdiff-action. It runs the engine that action was built
+        # from, tufin/oasdiff:v1.26.1, pinned by digest in its action.yml, so
+        # a local `oasdiff v1.26.1` reproduces what CI decides here.
+        uses: ./.github/actions/oasdiff-breaking
         with:
           base: base/${{ matrix.spec }}
           revision: ${{ matrix.spec }}
@@ -118,7 +122,3 @@ jobs:
           # named: a changed non-success status (401 -> 403) and an enum value
           # dropped from a response property.
           include-checks: response-non-success-status-removed,response-property-enum-value-removed
-          # Do not upload the two specs to oasdiff.com for a side-by-side
-          # review page. The default is `true`; the detection and the inline
-          # annotations work without it, so nothing leaves CI.
-          review: false

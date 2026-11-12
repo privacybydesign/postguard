@@ -41,11 +41,21 @@
 # `enforcement=disabled`, merge, flip it back -- is reported as drift while it
 # is open, which is the loud behaviour that hatch is supposed to have.
 #
+# Only the repository's own rulesets are compared. The privacybydesign
+# organization adds a ruleset of its own to every repository it holds (a
+# `Status checks passed` gate, switched per repository by a custom property),
+# and the effective-rules endpoint returns those rules next to this
+# repository's, marked `ruleset_source_type: "Organization"`. They are left out
+# on both sides: the guard's constant names what this repository's ruleset has
+# to require, and a rule the organization owns is not this script's to pin --
+# counting it would report drift every time the organization turned its gate
+# on or off, with nothing here to edit in response.
+#
 # Usage:
 #   scripts/ruleset-drift.sh
 #
 # Environment:
-#   RULESET_REPO     owner/name to inspect. Default: encryption4all/postguard.
+#   RULESET_REPO     owner/name to inspect. Default: privacybydesign/postguard.
 #   RULESET_BRANCH   branch whose effective rules are read. Default: main.
 #   RULESET_EXPECTED newline-separated contexts to expect. Default: read out of
 #                    pg-core/tests/ci_wiring.rs, so the expectation has exactly
@@ -74,7 +84,7 @@ set -euo pipefail
 root=$(git rev-parse --show-toplevel)
 cd "$root"
 
-repo=${RULESET_REPO:-encryption4all/postguard}
+repo=${RULESET_REPO:-privacybydesign/postguard}
 branch=${RULESET_BRANCH:-main}
 api=${GITHUB_API_URL:-https://api.github.com}
 guard=${RULESET_GUARD:-pg-core/tests/ci_wiring.rs}
@@ -150,11 +160,13 @@ jq -e 'type == "array"' "$body" >/dev/null 2>&1 || {
 actual=$(jq -r '
   [ .[]
     | select(.type == "required_status_checks")
+    | select(.ruleset_source_type != "Organization")
     | .parameters.required_status_checks[]?
     | .context
   ] | .[]' "$body" | LC_ALL=C sort -u)
 
-sources=$(jq -r '[.[] | select(.type == "required_status_checks") | .ruleset_id]
+sources=$(jq -r '[.[] | select(.type == "required_status_checks")
+    | select(.ruleset_source_type != "Organization") | .ruleset_id]
   | unique | map(tostring) | join(", ")' "$body")
 
 # Contexts contain spaces ("Wire compat", "Build & test"), so every one of

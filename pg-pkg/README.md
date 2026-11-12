@@ -175,7 +175,7 @@ The response looks similar as `GET /v2/irma/key/{timestamp}`, except with signin
 ## Adding API keys
 
 API keys are created through the
-[postguard-business](https://github.com/encryption4all/postguard-business)
+[postguard-business](https://github.com/privacybydesign/postguard-business)
 portal (Organization → API keys → Create). A newly-created key is shown to
 the user once, never stored in plaintext, and hashed with SHA-256 before
 being written to `business_api_keys.key_hash`.

@@ -266,7 +266,7 @@ a breaking edit to it needs a new versioned route rather than an in-place change
 the base branch. Its whole behaviour is two step inputs, and a wrong pair fails
 open: the job goes green and nobody learns the change went through. So
 `mod api_gate_tests` in `src/main.rs` mutates the real spec one way per rule,
-runs the real engine with the flags the action's entrypoint builds, and asserts
+runs the real engine with the flags the workflow's local action builds, and asserts
 stop-or-pass. It also reads the committed workflow and asserts its two inputs
 are the constants the module pins, and that the job still triggers on
 `pull_request` with no path filter and no `if:` — settings on a gate that never

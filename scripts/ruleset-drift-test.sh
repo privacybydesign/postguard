@@ -110,6 +110,24 @@ expect 1 "a renamed context on the ruleset is drift" "DRIFT"
 STUB_BODY=$(body_with '{"context":"Wire compat"},{"context":"Extra gate"}')
 expect 1 "an unexpected extra required context is drift" "Extra gate"
 
+# --- an organization's ruleset is not this repository's to pin -----------------
+#
+# The effective-rules endpoint returns the organization's rules next to the
+# repository's. A context the organization requires is not drift here, and it
+# cannot stand in for the one this repository's ruleset has to require.
+org_rule='{"type":"required_status_checks","ruleset_source_type":"Organization","ruleset_id":25645919,
+  "parameters":{"required_status_checks":[{"context":"Status checks passed"}]}}'
+STUB_BODY="[$org_rule,
+  {\"type\":\"required_status_checks\",\"ruleset_source_type\":\"Repository\",\"ruleset_id\":20607291,
+  \"parameters\":{\"required_status_checks\":[{\"context\":\"Wire compat\"}]}}]"
+expect 0 "a context required by an organization ruleset is not drift" "20607291"
+
+STUB_BODY="[$org_rule]"
+expect 1 "an organization ruleset alone does not satisfy the guard" "<none"
+
+STUB_BODY="[${org_rule/Status checks passed/Wire compat}]"
+expect 1 "nor does one that happens to require the same context" "<none"
+
 # --- multi-word contexts survive the round trip ------------------------------
 #
 # Regression: every context in this fleet contains a space ("Wire compat",

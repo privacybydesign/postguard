@@ -4,7 +4,7 @@ on:
       - main
   pull_request:
     # `edited` included for base retargets (e.g. a stacked PR's base merging):
-    # paths-filter's verdict depends on the base, and without `edited` a stale
+    # the path filter's verdict depends on the base, and without `edited` a stale
     # verdict stays attached to the unchanged head sha.
     types: [opened, synchronize, reopened, edited]
     branches:
@@ -13,17 +13,21 @@ on:
 
 name: Continuous integration
 
+# The default for every job; a job that needs more says so itself.
+permissions:
+  contents: read
+
 jobs:
   # sonarqube:
   #   name: SonarQube
   #   runs-on: ubuntu-latest
   #   continue-on-error: true
   #   steps:
-  #     - uses: actions/checkout@v4
+  #     - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
   #       with:
   #         fetch-depth: 0  # Shallow clones should be disabled for a better relevancy of analysis
   #     - name: SonarQube Scan
-  #       uses: SonarSource/sonarqube-scan-action@v6
+  #       uses: SonarSource/sonarqube-scan-action@fd88b7d7ccbaefd23d8f36f73b59db7a3d246602 # v6.0.0
   #       env:
   #         SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
   # The matrix keys on the crate directory rather than a `pg-` suffix, because
@@ -38,8 +42,14 @@ jobs:
         crate: [pg-core, pg-pkg, pg-cli, pg-ffi, cryptify]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - name: Install Rust toolchain
+        shell: bash
+        run: |
+          rustup toolchain install stable --profile minimal --no-self-update
+          rustup default stable
       - if: ${{ matrix.crate == 'pg-core' }}
         run: cargo test --manifest-path pg-core/Cargo.toml --features test,rust,stream
       # cryptify declares no features of its own, so `--all-targets` (what its
@@ -56,8 +66,14 @@ jobs:
         crate: [pg-core, pg-pkg, pg-cli, pg-ffi, cryptify]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - name: Install Rust toolchain
+        shell: bash
+        run: |
+          rustup toolchain install stable --profile minimal --no-self-update
+          rustup default stable
       - run: cargo fmt --manifest-path ${{ matrix.crate }}/Cargo.toml --all -- --check
 
   clippy:
@@ -67,10 +83,14 @@ jobs:
         crate: [pg-core, pg-pkg, pg-cli, pg-ffi, cryptify]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
-          components: clippy
+          persist-credentials: false
+      - name: Install Rust toolchain
+        shell: bash
+        run: |
+          rustup toolchain install stable --profile minimal --no-self-update --component clippy
+          rustup default stable
       - if: ${{ matrix.crate == 'pg-core' }}
         run: cargo clippy --manifest-path pg-core/Cargo.toml --all-targets --features test,rust,stream -- -D warnings
       - if: ${{ matrix.crate == 'cryptify' }}
@@ -105,7 +125,9 @@ jobs:
       # -- that is what `timeout-minutes` above is for.
       WASM_BINDGEN_TEST_TIMEOUT: 70
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
       - name: Install
         run: cargo install wasm-pack
       - if: ${{ matrix.browser == 'firefox' }}
@@ -146,7 +168,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      pull-requests: read # paths-filter reads the PR's changed files
+      pull-requests: read # scripts/changed-paths.sh reads the PR's changed files
     # wire-compat-js (#261) opens the same bytes with the published npm readers.
     # It downloads the artifact the seal step below produces, so it gates on the
     # same outcome the upload gates on rather than re-running the path filter and
@@ -154,13 +176,17 @@ jobs:
     outputs:
       sealed: ${{ steps.seal.outcome }}
     steps:
-      - uses: actions/checkout@v4
-      # SHA-pinned as the one action new to this repo; the rest follow the
-      # file's existing floating-ref convention.
-      - uses: dorny/paths-filter@7b450fff21473bca461d4b92ce414b9d0420d706 # v4.0.2
-        id: changes
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
-          filters: |
+          persist-credentials: false
+      - name: Which paths did this change touch
+        id: changes
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          FILTERS: |
             wire:
               - 'pg-core/**'
               - 'pg-wasm/**'
@@ -173,6 +199,7 @@ jobs:
               - 'Cargo.lock'
               - 'Cargo.toml'
               - '.github/workflows/build.yml'
+        run: scripts/changed-paths.sh
 
       # One decision, read by every step below, so the push override cannot be
       # applied to the seal but forgotten on the open.
@@ -189,9 +216,10 @@ jobs:
           fi
 
       - if: steps.gate.outputs.run == 'true'
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          components: clippy, rustfmt
+        shell: bash
+        run: |
+          rustup toolchain install stable --profile minimal --no-self-update --component clippy,rustfmt
+          rustup default stable
 
       - name: Seal the sample set with HEAD
         id: seal
@@ -205,7 +233,7 @@ jobs:
       # red gate still leaves the bytes that broke it.
       - name: Upload the sample set
         if: steps.seal.outcome == 'success'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: wire-compat-artifacts-${{ github.event.pull_request.head.sha || github.sha }}
           path: ${{ runner.temp }}/wire-compat-artifacts
@@ -229,20 +257,28 @@ jobs:
       contents: read
       pull-requests: read
     steps:
-      - uses: actions/checkout@v4
-      - uses: dorny/paths-filter@7b450fff21473bca461d4b92ce414b9d0420d706 # v4.0.2
-        id: changes
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
-          filters: |
+          persist-credentials: false
+      - name: Which paths did this change touch
+        id: changes
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          FILTERS: |
             wire:
               - 'pg-compat/**'
               - 'Cargo.lock'
               - 'Cargo.toml'
               - '.github/workflows/build.yml'
+        run: scripts/changed-paths.sh
       - if: steps.changes.outputs.wire == 'true'
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          components: clippy, rustfmt
+        shell: bash
+        run: |
+          rustup toolchain install stable --profile minimal --no-self-update --component clippy,rustfmt
+          rustup default stable
       - name: Format pg-compat
         if: steps.changes.outputs.wire == 'true'
         run: cargo fmt --manifest-path pg-compat/Cargo.toml --all -- --check
@@ -269,18 +305,23 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      pull-requests: read # paths-filter reads the PR's changed files
+      pull-requests: read # scripts/changed-paths.sh reads the PR's changed files
     steps:
       # pg-wasm is not published to crates.io, so its baseline is origin/main
       # rather than a registry version, and the full history has to be here.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           fetch-depth: 0
+          persist-credentials: false
 
-      - uses: dorny/paths-filter@7b450fff21473bca461d4b92ce414b9d0420d706 # v4.0.2
+      - name: Which paths did this change touch
         id: changes
-        with:
-          filters: |
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          FILTERS: |
             api:
               - 'pg-core/**'
               - 'pg-wasm/**'
@@ -289,6 +330,7 @@ jobs:
               - 'scripts/semver-checks.sh'
               - 'scripts/semver-checks-test.sh'
               - '.github/workflows/build.yml'
+        run: scripts/changed-paths.sh
 
       # Stubs cargo, so it needs no toolchain and runs in under a second. It
       # covers the 100-vs-101 exit-code mapping the gate depends on: 100 is a
@@ -299,9 +341,10 @@ jobs:
         run: ./scripts/semver-checks-test.sh
 
       - if: steps.changes.outputs.api == 'true'
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: wasm32-unknown-unknown
+        shell: bash
+        run: |
+          rustup toolchain install stable --profile minimal --no-self-update --target wasm32-unknown-unknown
+          rustup default stable
 
       # Pinned release binary rather than `cargo install` (a five-minute build)
       # or a fourth third-party action. Bump the version and the digest together.
@@ -367,14 +410,16 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
 
       # Every step below is behind the seal outcome, not just the download.
       # `outcome` is 'skipped' when the path filter said no (nothing to open,
       # report success) and 'failure' when sealing itself broke (wire-compat-rust
       # owns that failure; do not report it twice).
       - if: needs.wire-compat-rust.outputs.sealed == 'success'
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
         with:
           node-version: '24'
           cache: npm
@@ -382,7 +427,7 @@ jobs:
 
       - name: Download the sample set
         if: needs.wire-compat-rust.outputs.sealed == 'success'
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: wire-compat-artifacts-${{ github.event.pull_request.head.sha || github.sha }}
           path: ${{ runner.temp }}/wire-compat-artifacts
@@ -477,7 +522,7 @@ jobs:
       # rule in a ruleset instead.
       issues: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           # The changelog-coverage checker's self-test below (#412) runs
           # against fixtures that are real tags in this repo's history, so the
@@ -485,6 +530,7 @@ jobs:
           # makes the coverage script report exit 2 (undetermined) on every
           # one of them instead of exercising the case.
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Compare the live ruleset against the guard's constant
         shell: bash
@@ -519,3 +565,9 @@ jobs:
       - name: Test the map-budget checker
         shell: bash
         run: scripts/map-budget-test.sh
+
+      # The path filter the wire, pg-compat and semver jobs above decide on.
+      # Offline: the changed files come from a fixture, so `gh` is never called.
+      - name: Test the path filter
+        shell: bash
+        run: scripts/changed-paths-test.sh
