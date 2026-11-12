@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.42](https://github.com/privacybydesign/postguard/compare/cryptify-v0.1.41...cryptify-v0.1.42) - 2026-11-12
+
+### Other
+
+- add the shared status checks after the move to privacybydesign ([#464](https://github.com/privacybydesign/postguard/pull/464))
+
 ## [0.1.41](https://github.com/encryption4all/postguard/compare/cryptify-v0.1.40...cryptify-v0.1.41) - 2026-09-24
 
 ### Other

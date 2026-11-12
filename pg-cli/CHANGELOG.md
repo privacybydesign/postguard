@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.16](https://github.com/privacybydesign/postguard/compare/pg-cli-v0.3.15...pg-cli-v0.3.16) - 2026-11-12
+
+### Other
+
+- add the shared status checks after the move to privacybydesign ([#464](https://github.com/privacybydesign/postguard/pull/464))
+
 ## [0.3.15](https://github.com/encryption4all/postguard/compare/pg-cli-v0.3.14...pg-cli-v0.3.15) - 2026-09-24
 
 ### Other
