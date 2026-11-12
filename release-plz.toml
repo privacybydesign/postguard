@@ -42,7 +42,7 @@ git_only = true
 # previous release for this package and would otherwise changelog the whole
 # imported history into one entry. `git_release_enable = false` on the first
 # release, or a hand-placed `cryptify-v0.1.27` tag on the import commit, is
-# what stops that; see the note on encryption4all/postguard#255.
+# what stops that; see the note on privacybydesign/postguard#255.
 [[package]]
 name = "cryptify"
 publish = false

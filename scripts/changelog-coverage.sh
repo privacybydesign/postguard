@@ -160,7 +160,7 @@ while IFS= read -r subject; do
   if [[ $accounted -eq 0 ]]; then
     if [[ ${#prs[@]} -gt 0 ]]; then
       last_pr=${prs[-1]}
-      link="https://github.com/encryption4all/postguard/pull/$last_pr"
+      link="https://github.com/privacybydesign/postguard/pull/$last_pr"
       if [[ -n $scope ]]; then
         missing+=("- *($scope)* $description ([#$last_pr]($link))")
       else

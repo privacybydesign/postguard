@@ -10,10 +10,10 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/encryption4all/postguard.git",
+    "url": "git+https://github.com/privacybydesign/postguard.git",
     "directory": "pg-wasm"
   },
-  "homepage": "https://github.com/encryption4all/postguard/tree/main/pg-wasm#readme",
+  "homepage": "https://github.com/privacybydesign/postguard/tree/main/pg-wasm#readme",
   "exports": {
     ".": {
       "types": "./bundler/index.d.ts",

@@ -1,7 +1,7 @@
 # Grafana dashboard for cryptify usage
 
 `cryptify-usage.json` is the reference dashboard behind
-[postguard#305](https://github.com/encryption4all/postguard/issues/305): messages
+[postguard#305](https://github.com/privacybydesign/postguard/issues/305): messages
 sent per channel, and cryptify storage in use per environment.
 
 It reads only metrics that `GET /metrics` already exports (see

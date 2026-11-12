@@ -1,0 +1,53 @@
+# The check the privacybydesign organization requires on every pull request.
+#
+# The organization's ruleset names one context, `Status checks passed`, and
+# this workflow produces it from the checks every repository there shares. The
+# gates that are this repository's own stay where they are: `Wire compat` in
+# build.yml is required by this repository's ruleset, and the path-filtered and
+# matrix jobs around it are not the kind of thing a single always-on context
+# can wait for.
+name: Status checks
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  merge_group:
+  workflow_dispatch:
+
+permissions: {}
+
+# A new push to a PR cancels the PR's previous run. Other events get a
+# group of their own (run_id), so they never wait for or cancel each other.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  dependency-review:
+    uses: privacybydesign/github-workflows/.github/workflows/dependency-review.yml@v1
+    permissions:
+      contents: read
+      pull-requests: write
+
+  workflow-lint:
+    uses: privacybydesign/github-workflows/.github/workflows/workflow-lint.yml@v1
+    permissions:
+      contents: read
+
+  # Single required check for the organization ruleset: job names inside this
+  # workflow can change without touching the ruleset.
+  passed:
+    name: Status checks passed
+    if: always()
+    needs: [dependency-review, workflow-lint]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      - name: All required jobs succeeded
+        env:
+          RESULTS: ${{ toJSON(needs.*.result) }}
+        run: |
+          echo "$RESULTS"
+          if grep -qE '"(failure|cancelled)"' <<< "$RESULTS"; then exit 1; fi

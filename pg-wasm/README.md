@@ -7,7 +7,7 @@ API, and `@e4a/pg-wasm` is its dependency.
 This package is published to npm on every `pg-core` release, at `pg-core`'s
 version, and has no release cycle of its own. For what changed in a given
 version, read
-[`pg-core`'s changelog](https://github.com/encryption4all/postguard/blob/main/pg-core/CHANGELOG.md)
+[`pg-core`'s changelog](https://github.com/privacybydesign/postguard/blob/main/pg-core/CHANGELOG.md)
 for the same version number.
 
 This package contains automatically generated WebAssembly bindings to call into
@@ -23,7 +23,7 @@ If not available, please consider using a polyfill, see
 
 ## Usage
 
-See [the examples in `postguard-js`](https://github.com/encryption4all/postguard-js/tree/main/examples)
+See [the examples in `postguard-js`](https://github.com/privacybydesign/postguard-js/tree/main/examples)
 for working examples.
 
 ### Fetching keys

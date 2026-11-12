@@ -209,6 +209,13 @@ const WASM_PACKAGE_CHECK_TEST_COMMAND: &str = "scripts/wasm-package-check-test.s
 /// [`the_map_budget_checkers_self_test_runs_in_ci`].
 const MAP_BUDGET_TEST_COMMAND: &str = "scripts/map-budget-test.sh";
 
+/// The path filter's own regression suite. `scripts/changed-paths.sh` decides
+/// whether the wire, pg-compat and semver gates do their work on a pull
+/// request, so a wrong `false` from it skips a gate while the job reports
+/// green. `build.yml`'s `ruleset-drift` job must also run this -- see
+/// [`the_changed_paths_scripts_self_test_runs_in_ci`].
+const CHANGED_PATHS_TEST_COMMAND: &str = "scripts/changed-paths-test.sh";
+
 /// `test-wasm-browsers`'s corrected step (#416): a bare `run:` invoking
 /// `wasm-pack test` directly, with the browser flag intact and no backslash
 /// ahead of it. The backslash at `build.yml:107` was an artifact of
@@ -367,14 +374,15 @@ fn step_with<'a>(steps: &'a [String], needle: &str, file: &str) -> &'a str {
     found[0]
 }
 
-/// The paths of the single `dorny/paths-filter` filter in a job.
+/// The paths of the single path filter in a job: the `FILTERS` block its
+/// `scripts/changed-paths.sh` step reads.
 ///
-/// Read from the `filters: |` block literal rather than from the job at large,
+/// Read from the `FILTERS: |` block literal rather than from the job at large,
 /// so a quoted list elsewhere in the job cannot pad the set and make a narrowed
 /// filter look intact.
 fn filter_paths(job: &str) -> BTreeSet<String> {
-    let mut lines = job.lines().skip_while(|line| line.trim() != "filters: |");
-    let header = lines.next().expect("no `filters: |` block in the job");
+    let mut lines = job.lines().skip_while(|line| line.trim() != "FILTERS: |");
+    let header = lines.next().expect("no `FILTERS: |` block in the job");
     let indent = header.len() - header.trim_start().len();
 
     lines
@@ -415,7 +423,7 @@ fn the_required_check_name_still_names_the_aggregator() {
          {REQUIRED_CHECK:?}, and {} jobs in {} carry that name: {named:?}. A ruleset \
          requiring a context no job produces blocks nothing, so renaming this job disarms \
          the gate instead of breaking it -- rename the ruleset's context in the same change \
-         (`gh api repos/encryption4all/postguard/rules/branches/main`).",
+         (`gh api repos/privacybydesign/postguard/rules/branches/main`).",
         named.len(),
         workflow_path(BUILD_WORKFLOW).display(),
     );
@@ -476,7 +484,7 @@ fn the_required_check_name_still_names_the_aggregator() {
 /// the semver gate's green -- earned with `release_type=major`, which skips
 /// every lint -- stays on the unchanged head sha, and release-plz then cuts a
 /// patch release of the break. A base retarget fires only `edited` too, so
-/// paths-filter's "nothing relevant changed" survives against a base it never
+/// the path filter's "nothing relevant changed" survives against a base it never
 /// compared.
 #[test]
 fn a_retitled_or_retargeted_pr_still_re_runs_the_gates() {
@@ -503,7 +511,7 @@ fn a_retitled_or_retargeted_pr_still_re_runs_the_gates() {
         "the `pull_request` trigger no longer re-runs on the events these gates' verdicts \
          depend on. `edited` is the one that is not a default: without it a retitle leaves \
          the semver gate's verdict attached to the title it was computed from, and a base \
-         retarget leaves paths-filter's attached to the old base",
+         retarget leaves the path filter's attached to the old base",
     );
 }
 
@@ -1149,6 +1157,21 @@ fn the_map_budget_checkers_self_test_runs_in_ci() {
     let steps = steps(&job);
 
     step_with(&steps, MAP_BUDGET_TEST_COMMAND, BUILD_WORKFLOW);
+}
+
+/// The path filter's own regression suite, same reasoning as
+/// [`the_map_budget_checkers_self_test_runs_in_ci`] just above. The script
+/// replaced `dorny/paths-filter` when the repository moved to an organization
+/// that does not run that action, and it is deliberately narrower: it refuses
+/// any pattern that is not a path or a `dir/**`. Its suite is what pins that
+/// refusal, and the exit code 2 that keeps "could not find out" from being
+/// read as "nothing changed".
+#[test]
+fn the_changed_paths_scripts_self_test_runs_in_ci() {
+    let job = job(&workflow(BUILD_WORKFLOW), "ruleset-drift", BUILD_WORKFLOW);
+    let steps = steps(&job);
+
+    step_with(&steps, CHANGED_PATHS_TEST_COMMAND, BUILD_WORKFLOW);
 }
 
 /// #416, implemented: `test-wasm-browsers` gets an honest job-level timeout

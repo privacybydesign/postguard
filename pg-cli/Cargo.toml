@@ -5,10 +5,10 @@ authors = [
 ]
 description = "Commandline interface for PostGuard"
 edition = "2021"
-homepage = "https://github.com/encryption4all/postguard/tree/main/pg-cli"
+homepage = "https://github.com/privacybydesign/postguard/tree/main/pg-cli"
 keywords = ["ibe", "encryption", "ecc"]
 license = "MIT"
-repository = "https://github.com/encryption4all/postguard"
+repository = "https://github.com/privacybydesign/postguard"
 categories = ["cryptography"]
 name = "pg-cli"
 version = "0.3.15"

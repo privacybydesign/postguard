@@ -8,7 +8,7 @@
 # Entirely offline: every fixture is built in a temp dir, except the
 # known-good fixture at scripts/testdata/map-247-body.md, which is a
 # permanent, committed snapshot of #247's real body (#445) -- taken with
-# `gh issue view 247 -R encryption4all/postguard --json body -q .body` on
+# `gh issue view 247 -R privacybydesign/postguard --json body -q .body` on
 # 2026-09-23, byte for byte, trailing blank lines included. It is a
 # snapshot, not a live copy: #247's body will keep changing after this is
 # committed, and this fixture is not meant to track it.

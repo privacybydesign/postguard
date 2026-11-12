@@ -63,6 +63,11 @@ pub(crate) struct ApiKeySigningInfo {
 
 /// Trait for API key storage/lookup. Implement this trait to provide custom API key validation.
 /// This abstraction allows for easy testing by providing mock implementations.
+//
+// `async_trait` marks the boxed future it generates `#[must_use]`, and since
+// Rust 1.99 clippy counts a pinned boxed future as `#[must_use]` already. The
+// attribute is the macro's, so there is nothing here to remove.
+#[allow(clippy::double_must_use)]
 #[async_trait::async_trait(?Send)]
 pub trait ApiKeyStore {
     /// Look up an API key and return the associated data if valid.

@@ -5,8 +5,7 @@
 //! deployed client.
 //!
 //! The gate's verdict is decided by two step inputs, `fail-on` and
-//! `include-checks`, plus the pinned action ref that decides which engine
-//! version reads them, and getting any of the three wrong fails open: the job
+//! `include-checks`, plus the pinned engine image that reads them, and getting any of the three wrong fails open: the job
 //! goes green and nobody learns that the change it was supposed to stop went
 //! through.
 //! `fail-on: ERR` alone passes a removed optional response property, a removed
@@ -21,7 +20,8 @@
 //!
 //! The engine is not vendored, so the verdict test needs `oasdiff` on `PATH`
 //! (or `OASDIFF` pointing at it) and skips when it is absent, which is the case
-//! in CI. Install the version the action pins, so a local verdict is CI's:
+//! in CI. Install the version the workflow's action pins, so a local verdict is
+//! CI's:
 //!
 //! ```text
 //! go install github.com/oasdiff/oasdiff@v1.26.1
@@ -44,12 +44,17 @@ const FAIL_ON: &str = "WARN";
 const INCLUDE_CHECKS: &str =
     "response-non-success-status-removed,response-property-enum-value-removed";
 
-/// The action ref in the workflow's oasdiff step. This is the third input the
-/// verdicts depend on, and the least obvious: it pins the *engine*, because
-/// `v0.1.10`'s Dockerfile is `FROM tufin/oasdiff:v1.26.1` and every verdict
+/// The action the workflow's oasdiff step uses: a local one, because the
+/// organization this repository lives in does not run `oasdiff/oasdiff-action`.
+const ACTION_REF: &str = "uses: ./.github/actions/oasdiff-breaking";
+
+/// The image that local action runs. This is the third input the verdicts
+/// depend on, and the least obvious: it pins the *engine*, and every verdict
 /// below was measured against v1.26.1. A bump with no re-measurement is the
-/// same fail-open `FAIL_ON` guards against, so it is pinned here too.
-const ACTION_REF: &str = "oasdiff/oasdiff-action/breaking@0ab8ad204b00d25acc5ae87106281433e288d0c1";
+/// same fail-open `FAIL_ON` guards against, so it is pinned here too, digest
+/// included: a tag can be moved, and a moved tag is a bump nobody reviewed.
+const ENGINE_REF: &str =
+    "tufin/oasdiff:v1.26.1@sha256:aae8cfcf7d18d3b0ebce6bdf407623bf8788ca318c7a0440627aaf583ed3e9f4";
 
 /// Whether the gate stops a change, i.e. whether the job goes red.
 #[derive(Debug, PartialEq, Eq)]
@@ -84,6 +89,12 @@ fn workflow_path() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("..")
         .join(".github/workflows/api-diff.yml")
+}
+
+fn action_path() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("..")
+        .join(".github/actions/oasdiff-breaking/action.yml")
 }
 
 /// The value of the `key:` mapping entry in the workflow, with the surrounding
@@ -145,9 +156,10 @@ fn block(text: &str, start: &str, end: &str) -> (usize, usize) {
 /// Runs the gate exactly as the workflow's step does: the committed spec as the
 /// base, `revision` as the PR's version.
 ///
-/// The entrypoint of `oasdiff/oasdiff-action/breaking@v0.1.10` turns the step
-/// inputs into `--allow-external-refs=false --include-checks <checks>
-/// --composed=false --fail-on <level>`, so those are the flags used here. Exit 0
+/// The local action (like the entrypoint of `oasdiff/oasdiff-action/breaking@v0.1.10`
+/// it replaced) turns the step inputs into `--allow-external-refs=false
+/// --include-checks <checks> --composed=false --fail-on <level>`, so those are
+/// the flags used here. Exit 0
 /// is a clean diff and exit 1 is "breaking changes found"; anything else is the
 /// engine refusing the input, which means the mutation produced a spec oasdiff
 /// cannot load and any verdict read off it would be meaningless.
@@ -538,10 +550,40 @@ fn the_workflow_step_matches_the_pinned_inputs() {
     );
     assert!(
         workflow.contains(ACTION_REF),
-        "the workflow's oasdiff step does not use {ACTION_REF}, so CI is not \
-         running the engine (tufin/oasdiff:v1.26.1) the verdicts this test pins \
-         were measured against"
+        "the workflow's oasdiff step is no longer `{ACTION_REF}`, so the engine \
+         pinned below is not the one CI runs"
     );
+
+    let path = action_path();
+    let action =
+        fs::read_to_string(&path).unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
+    let engines: Vec<&str> = action
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.starts_with('#'))
+        .filter_map(|line| line.strip_prefix("ENGINE:"))
+        .map(str::trim)
+        .collect();
+    assert_eq!(
+        engines,
+        [ENGINE_REF],
+        "{} does not run exactly {ENGINE_REF}, so CI is not running the engine \
+         (tufin/oasdiff:v1.26.1) the verdicts this test pins were measured against",
+        path.display()
+    );
+    for flag in [
+        "--allow-external-refs=false",
+        "--include-checks \"$INCLUDE_CHECKS\"",
+        "--composed=false",
+        "--fail-on \"$FAIL_ON\"",
+    ] {
+        assert!(
+            action.contains(flag),
+            "{} no longer passes `{flag}` to the engine, so `gate` below is not \
+             running what CI runs",
+            path.display()
+        );
+    }
 }
 
 /// Every mutation must still edit the spec, whether or not oasdiff is

@@ -5870,7 +5870,7 @@ mod api_description_tests {
 /// and nobody learns that the change it was supposed to stop went through.
 ///
 /// So the inputs are pinned here. This module mutates the real spec one way
-/// per rule, runs the real engine with the flags the action's entrypoint
+/// per rule, runs the real engine with the flags the workflow's local action
 /// builds, and asserts which mutations the gate stops.
 ///
 /// The two halves are tied together rather than kept in step by hand:
@@ -5979,9 +5979,9 @@ mod api_gate_tests {
     #[test]
     fn the_workflow_uses_the_settings_this_module_pins() {
         assert!(
-            WORKFLOW.contains("uses: oasdiff/oasdiff-action/breaking@"),
-            "{WORKFLOW_PATH} no longer runs oasdiff-action/breaking, so this \
-             module pins the settings of a job that is gone"
+            WORKFLOW.contains("uses: ./.github/actions/oasdiff-breaking"),
+            "{WORKFLOW_PATH} no longer runs the local oasdiff-breaking action, \
+             so this module pins the settings of a job that is gone"
         );
 
         let triggers = trigger_block();
@@ -6109,9 +6109,10 @@ mod api_gate_tests {
     /// Runs the gate exactly as the workflow's step does: the committed spec as
     /// the base, `revision` as the PR's version.
     ///
-    /// The entrypoint of `oasdiff/oasdiff-action/breaking@v0.1.10` turns the
-    /// step inputs into `--allow-external-refs=false --include-checks <checks>
-    /// --composed=false --fail-on <level>`, so those are the flags used here.
+    /// The workflow's local action, `.github/actions/oasdiff-breaking`, turns
+    /// the step inputs into `--allow-external-refs=false --include-checks
+    /// <checks> --composed=false --fail-on <level>`, so those are the flags used
+    /// here. `pg-pkg/tests/api_gate.rs` pins that the action still does.
     /// Exit 0 is a clean diff and exit 1 is "breaking changes found"; anything
     /// else is the engine refusing the input, which means the mutation produced
     /// a spec oasdiff cannot load and any verdict read off it is meaningless.
