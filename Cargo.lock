@@ -3223,7 +3223,7 @@ dependencies = [
  "actix-web-httpauth",
  "arrayref",
  "async-trait",
- "base64 0.22.1",
+ "base64 0.23.0",
  "bincode-next",
  "clap",
  "env_logger",
