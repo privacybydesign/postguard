@@ -4,7 +4,7 @@
 # 1.96.1 matches cryptify's Dockerfile, and >=1.94 is now a hard floor: sqlx
 # 0.9 declares rust-version 1.94.0, and sqlx 0.9 is what the workspace needs
 # for pg-pkg and cryptify to agree on one libsqlite3-sys.
-FROM rust:1.96.1-slim-trixie AS chef
+FROM rust:1.99.0-slim-trixie AS chef
 RUN apt-get update && apt-get --no-install-recommends install -y libssl-dev pkg-config \
     && rm -rf /var/lib/apt/lists/*
 RUN cargo install cargo-chef --locked
