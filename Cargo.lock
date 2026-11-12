@@ -1093,7 +1093,7 @@ dependencies = [
  "minreq",
  "pg-core",
  "rand 0.10.1",
- "rand 0.8.6",
+ "rand 0.8.8",
  "reqwest 0.13.4",
  "rocket",
  "rocket_cors",
@@ -2233,7 +2233,7 @@ dependencies = [
  "getrandom 0.2.17",
  "group",
  "pg-curve",
- "rand 0.8.6",
+ "rand 0.8.8",
  "subtle",
  "tiny-keccak",
 ]
@@ -2589,7 +2589,7 @@ dependencies = [
  "p256",
  "p384",
  "pem",
- "rand 0.8.6",
+ "rand 0.8.8",
  "rsa",
  "serde",
  "serde_json",
@@ -2892,7 +2892,7 @@ dependencies = [
  "num-integer",
  "num-iter",
  "num-traits",
- "rand 0.8.6",
+ "rand 0.8.8",
  "smallvec",
  "zeroize",
 ]
@@ -3148,7 +3148,7 @@ dependencies = [
  "irmars",
  "pg-core",
  "qrcode",
- "rand 0.8.6",
+ "rand 0.10.1",
  "reqwest 0.13.4",
  "serde",
  "serde_json",
@@ -3171,7 +3171,7 @@ dependencies = [
  "ibs",
  "irmars",
  "js-sys",
- "rand 0.8.6",
+ "rand 0.10.1",
  "rand_chacha 0.3.1",
  "serde",
  "serde-transcode",
@@ -3205,7 +3205,7 @@ dependencies = [
  "futures 0.3.32",
  "ibe",
  "pg-core",
- "rand 0.8.6",
+ "rand 0.10.1",
  "serde",
  "serde_json",
  "tokio",
@@ -3235,7 +3235,7 @@ dependencies = [
  "log",
  "pg-core",
  "prometheus",
- "rand 0.8.6",
+ "rand 0.10.1",
  "reqwest 0.13.4",
  "serde",
  "serde_json",
@@ -3531,9 +3531,9 @@ checksum = "dc33ff2d4973d518d823d61aa239014831e521c75da58e3df4840d3f47749d09"
 
 [[package]]
 name = "rand"
-version = "0.8.6"
+version = "0.8.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5ca0ecfa931c29007047d1bc58e623ab12e5590e8c7cc53200d5202b69266d8a"
+checksum = "e058c7de0b26af77780c769414d6257830bb240f3c38477dbc2c16e5f54d6d4c"
 dependencies = [
  "libc",
  "rand_chacha 0.3.1",
@@ -3836,7 +3836,7 @@ dependencies = [
  "num_cpus",
  "parking_lot",
  "pin-project-lite",
- "rand 0.8.6",
+ "rand 0.8.8",
  "ref-cast",
  "rocket_codegen",
  "rocket_http",
