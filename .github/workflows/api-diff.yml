@@ -97,13 +97,13 @@ jobs:
           - cryptify/api-description.yaml
     steps:
       - name: Check out the pull request
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # The spec is all this job reads, and the oasdiff container gets the
           # workspace mounted; do not leave a push token in .git/config for it.
           persist-credentials: false
       - name: Check out the base spec
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.event.pull_request.base.sha }}
           path: base
