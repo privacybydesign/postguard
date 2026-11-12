@@ -30,7 +30,7 @@ futures = { version = "0.3.27", optional = true }
 
 # For the Rust Crypto backend.
 aead = { version = "0.5", features = ["alloc"], optional = true }
-aes-gcm = { version = "0.10", optional = true }
+aes-gcm = { version = "0.11", optional = true }
 
 # For the Web Crypto backend.
 wasm-bindgen = { version = "0.2.104", optional = true }
