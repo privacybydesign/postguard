@@ -352,8 +352,8 @@ jobs:
         if: steps.changes.outputs.api == 'true'
         shell: bash
         env:
-          VERSION: 0.49.0
-          SHA256: 72f6834d75d28a66e02c9fd6a230ce901bb30eee6067b85867a97445df040e4a
+          VERSION: 0.51.0
+          SHA256: cacadafaa5cd27ae6d05a74a103266917ebab4c5e43c898360e177d4fbf06a65
         run: |
           curl -sSfL -o "$RUNNER_TEMP/cargo-semver-checks.tar.gz" \
             "https://github.com/obi1kenobi/cargo-semver-checks/releases/download/v${VERSION}/cargo-semver-checks-x86_64-unknown-linux-gnu.tar.gz"
