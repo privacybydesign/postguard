@@ -13,7 +13,7 @@ crate-type = ["cdylib", "staticlib"]
 pg-core = { path = "../pg-core", version = "0.6", features = ["rust", "stream"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-rand = "0.8"
+rand = "0.10"
 ibe = { version = "0.3.0", features = ["cgwkv", "mkem"] }
 futures = "0.3"
 tokio = { version = "1", features = ["rt"] }
