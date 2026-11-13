@@ -299,11 +299,6 @@ jobs:
             $(printf 'ghcr.io/${{ github.repository }}@sha256:%s ' *)
 
   # ---------------------------------------------------------------------------
-  # pg-ffi: build native libraries for all platforms
-  # ---------------------------------------------------------------------------
-
-  # Build pg-ffi native libraries and upload as GitHub release assets.
-  # ---------------------------------------------------------------------------
   # Docker: build, scan, and publish multi-arch image for cryptify
   #
   # Mirrors the pg-pkg jobs above rather than sharing them: the two images have
@@ -461,13 +456,26 @@ jobs:
             $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
             $(printf '${{ env.CRYPTIFY_IMAGE }}@sha256:%s ' *)
 
+  # ---------------------------------------------------------------------------
+  # pg-ffi and the .NET SDK (#256)
+  #
+  # E4A.PostGuard ships the pg-ffi native library for five platforms. All five
+  # are built here, from the commit this run is on, and handed to `dotnet pack`
+  # as workflow artifacts: the package cannot contain a library from any other
+  # commit, and there is no release tag to look up and no pin to keep current.
+  # Before the fold the SDK downloaded a pinned pg-ffi release, and shipped a
+  # pg-core eight patch releases behind `main` without anything noticing.
+  #
+  # The build and the pack run on pull requests too, so the fan-in is exercised
+  # before the release that depends on it. Only the two upload jobs at the end
+  # wait for release-plz.
+  # ---------------------------------------------------------------------------
+
   build-ffi:
     name: Build pg-ffi (${{ matrix.name }})
-    needs: release-plz-release
-    if: needs.release-plz-release.outputs.pg_ffi_version != ''
     runs-on: ${{ matrix.runner }}
     permissions:
-      contents: write
+      contents: read
     strategy:
       fail-fast: false
       matrix:
@@ -505,26 +513,143 @@ jobs:
           rustup toolchain install stable --profile minimal --no-self-update --target "$TARGET"
           rustup default stable
       - name: Build pg-ffi
-        run: cargo build --release --target ${{ matrix.target }} -p pg-ffi
-      - name: Package artifact (unix)
-        if: runner.os != 'Windows'
+        run: cargo build --release --locked --target ${{ matrix.target }} -p pg-ffi
+      # The artifact name is the .NET runtime identifier, which is also the
+      # directory pack-dotnet puts the library in.
+      - name: Upload the native library
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: pg-ffi-${{ matrix.name }}
+          path: target/${{ matrix.target }}/release/${{ matrix.lib }}
+          if-no-files-found: error
+          retention-days: 7
+
+  # Pack E4A.PostGuard around the five libraries above. The version is
+  # pg-core's, read by the csproj from pg-core/Cargo.toml.
+  pack-dotnet:
+    name: Pack E4A.PostGuard
+    needs: build-ffi
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
+        with:
+          dotnet-version: |
+            8.0.x
+            10.0.x
+      # No merge-multiple: each artifact lands in a directory of its own name,
+      # pg-ffi-<rid>/, because the two Linux libraries share a file name.
+      - name: Download the native libraries
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          path: ${{ runner.temp }}/pg-ffi
+          pattern: pg-ffi-*
+      - name: Place them where the csproj packs from
+        shell: bash
         run: |
-          mkdir -p staging
-          cp target/${{ matrix.target }}/release/${{ matrix.lib }} staging/
-          cd staging && tar czf ../pg-ffi-${{ matrix.name }}.tar.gz ./*
-      - name: Package artifact (windows)
-        if: runner.os == 'Windows'
-        run: |
-          mkdir staging
-          cp target/${{ matrix.target }}/release/${{ matrix.lib }} staging/
-          Compress-Archive -Path staging/* -DestinationPath pg-ffi-${{ matrix.name }}.zip
+          for rid in linux-x64 linux-arm64 osx-arm64 osx-x64 win-x64; do
+            mkdir -p "pg-dotnet/src/runtimes/$rid/native"
+            cp "$RUNNER_TEMP/pg-ffi/pg-ffi-$rid/"* "pg-dotnet/src/runtimes/$rid/native/"
+          done
+      - name: Pack
+        run: dotnet pack pg-dotnet/src/E4A.PostGuard.csproj --configuration Release --output "$RUNNER_TEMP/nupkg"
+      # A missing platform packs without complaint and fails in the consumer's
+      # process with DllNotFoundException, so the package is opened and checked.
+      - name: Check the package carries all five libraries
+        shell: bash
+        run: scripts/nupkg-check.sh "$RUNNER_TEMP/nupkg"
+      - name: Upload the package
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: nuget-package
+          path: ${{ runner.temp }}/nupkg/*.nupkg
+          if-no-files-found: error
+          retention-days: 7
+
+  # Attach the native libraries to the pg-ffi GitHub release, in the archive
+  # names and layout the releases have always had.
+  release-ffi:
+    name: Attach pg-ffi to its release
+    needs: [release-plz-release, build-ffi]
+    if: needs.release-plz-release.outputs.pg_ffi_version != ''
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download the native libraries
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          path: ${{ runner.temp }}/pg-ffi
+          pattern: pg-ffi-*
       - name: Upload to GitHub release
         shell: bash
+        working-directory: ${{ runner.temp }}/pg-ffi
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          TAG: pg-ffi-v${{ needs.release-plz-release.outputs.pg_ffi_version }}
         run: |
-          TAG="pg-ffi-v${{ needs.release-plz-release.outputs.pg_ffi_version }}"
-          gh release upload "$TAG" pg-ffi-${{ matrix.name }}.* --clobber
+          for rid in linux-x64 linux-arm64 osx-arm64 osx-x64; do
+            tar czf "pg-ffi-$rid.tar.gz" -C "pg-ffi-$rid" .
+          done
+          (cd pg-ffi-win-x64 && zip -q ../pg-ffi-win-x64.zip ./*)
+          gh release upload "$TAG" pg-ffi-*.tar.gz pg-ffi-win-x64.zip --clobber
+
+  # E4A.PostGuard is published on every pg-core release, at pg-core's version,
+  # like pg-wasm below. The package is the one pack-dotnet built in this run.
+  #
+  # `environment: nuget` is part of the trusted-publishing policy on nuget.org.
+  # A policy naming only this workflow file would let any job in it with
+  # `id-token: write` mint a publish key, and this file also publishes crates
+  # and pg-wasm. NUGET_USER is a secret of that environment.
+  publish-dotnet:
+    name: Publish E4A.PostGuard to NuGet
+    needs: [release-plz-release, pack-dotnet]
+    if: needs.release-plz-release.outputs.pg_core_version != ''
+    runs-on: ubuntu-latest
+    environment: nuget
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
+        with:
+          dotnet-version: 10.0.x
+      - name: Download the package
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: nuget-package
+          path: ${{ runner.temp }}/nupkg
+      # The csproj read its version from pg-core/Cargo.toml and release-plz
+      # read the same file; this is the check that they agree before anything
+      # irreversible happens.
+      - name: Check the package is at the released pg-core version
+        shell: bash
+        env:
+          PG_CORE_VERSION: ${{ needs.release-plz-release.outputs.pg_core_version }}
+        run: scripts/nupkg-check.sh "$RUNNER_TEMP/nupkg" "$PG_CORE_VERSION"
+      - name: NuGet login (trusted publishing)
+        id: login
+        shell: bash
+        env:
+          NUGET_USER: ${{ secrets.NUGET_USER }}
+        run: scripts/nuget-login.sh
+      - name: Publish to NuGet
+        shell: bash
+        env:
+          NUGET_API_KEY: ${{ steps.login.outputs.api_key }}
+        run: |
+          dotnet nuget push "$RUNNER_TEMP"/nupkg/*.nupkg --api-key "$NUGET_API_KEY" \
+            --source https://api.nuget.org/v3/index.json --skip-duplicate
 
   # ---------------------------------------------------------------------------
   # npm: publish pg-wasm to npmjs

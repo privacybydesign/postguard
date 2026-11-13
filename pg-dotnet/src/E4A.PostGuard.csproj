@@ -1,0 +1,69 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFrameworks>net8.0;net10.0</TargetFrameworks>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>E4A.PostGuard</RootNamespace>
+    <AssemblyName>E4A.PostGuard</AssemblyName>
+
+    <!-- NuGet package metadata -->
+    <PackageId>E4A.PostGuard</PackageId>
+    <!--
+      The version is pg-core's, read from its manifest: this package wraps the pg-core built from
+      the same commit, and it is published on every pg-core release at that version. There is no
+      second number to bump. `[package]` is the first table in pg-core/Cargo.toml, so the first
+      `version = "..."` line is the crate's own; PgCoreVersionTests fails if that stops being true.
+    -->
+    <PgCoreManifest>$([System.IO.File]::ReadAllText('$(MSBuildThisFileDirectory)../../pg-core/Cargo.toml'))</PgCoreManifest>
+    <Version>$([System.Text.RegularExpressions.Regex]::Match($(PgCoreManifest), '(?m)^version\s*=\s*"([^"]+)"').Groups[1].Value)</Version>
+    <Authors>Encryption 4 All</Authors>
+    <Description>PostGuard .NET SDK — identity-based encryption for secure file sharing</Description>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageProjectUrl>https://github.com/privacybydesign/postguard/tree/main/pg-dotnet</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/privacybydesign/postguard</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageTags>ibe;encryption;postguard;identity-based-encryption</PackageTags>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+
+    <!--
+      The public surface of this package is a contract, so PublicApiAnalyzers findings have to
+      break the build instead of scrolling past as warnings. WarningsAsErrors is used rather than
+      an .editorconfig severity because RS0017 and friends are reported against
+      PublicAPI.Shipped.txt, and path-based .editorconfig severity does not reach additional files.
+    -->
+    <WarningsAsErrors>$(WarningsAsErrors);RS0016;RS0017;RS0024;RS0025;RS0036;RS0037;RS0041;RS0048;RS0050</WarningsAsErrors>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="../README.md" Pack="true" PackagePath=""/>
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="E4A.PostGuard.Tests"/>
+  </ItemGroup>
+
+  <!-- Public API surface tracking: every public member must be listed in PublicAPI.*.txt -->
+  <ItemGroup>
+    <PackageReference Include="Microsoft.CodeAnalysis.PublicApiAnalyzers" Version="5.6.0">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+    <AdditionalFiles Include="PublicAPI.Shipped.txt"/>
+    <AdditionalFiles Include="PublicAPI.Unshipped.txt"/>
+  </ItemGroup>
+
+  <!--
+    Native pg-ffi libraries, packed into runtimes/. Nothing is committed under src/runtimes/:
+    `pg-ffi/build.sh` fills in the host platform for local work, and delivery.yml's pack-dotnet
+    job fills in all five from the build-ffi matrix of the same run.
+  -->
+  <ItemGroup>
+    <None Include="runtimes/linux-x64/native/**" Pack="true" PackagePath="runtimes/linux-x64/native" Link="runtimes/linux-x64/native/%(Filename)%(Extension)"/>
+    <None Include="runtimes/linux-arm64/native/**" Pack="true" PackagePath="runtimes/linux-arm64/native" Link="runtimes/linux-arm64/native/%(Filename)%(Extension)"/>
+    <None Include="runtimes/osx-arm64/native/**" Pack="true" PackagePath="runtimes/osx-arm64/native" Link="runtimes/osx-arm64/native/%(Filename)%(Extension)"/>
+    <None Include="runtimes/osx-x64/native/**" Pack="true" PackagePath="runtimes/osx-x64/native" Link="runtimes/osx-x64/native/%(Filename)%(Extension)"/>
+    <None Include="runtimes/win-x64/native/**" Pack="true" PackagePath="runtimes/win-x64/native" Link="runtimes/win-x64/native/%(Filename)%(Extension)"/>
+  </ItemGroup>
+
+</Project>

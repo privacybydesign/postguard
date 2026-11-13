@@ -1,0 +1,21 @@
+# .NET
+bin/
+obj/
+*.user
+*.suo
+*.vs/
+*.lscache
+
+# Native libraries (built from source by pg-ffi/build.sh or CI)
+src/runtimes/
+
+# dotnet pack output
+artifacts/
+
+# IDE
+.idea/
+.vscode/
+
+# OS
+.DS_Store
+Thumbs.db

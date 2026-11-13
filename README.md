@@ -17,6 +17,7 @@ What external consumers can rely on (`/v2` endpoint stability, the archival read
 | `pg-wasm` | WebAssembly bindings (via wasm-pack) for using the core library in web applications. |
 | `pg-cli` | Command-line tool for encrypting and decrypting files. |
 | `pg-ffi` | Foreign function interface bindings for calling pg-core from other languages (C, C#, etc.). |
+| `pg-dotnet` | The .NET SDK, `E4A.PostGuard` on NuGet: a sending-side wrapper around `pg-ffi`. Published on every `pg-core` release, at `pg-core`'s version. |
 
 ### Session flow
 
@@ -64,6 +65,7 @@ Releases are automated with [release-plz](https://release-plz.ieni.dev/). When c
 
 - **crates.io** (pg-core, pg-cli, pg-pkg, pg-ffi)
 - **npm** (pg-wasm)
+- **NuGet** (pg-dotnet, as `E4A.PostGuard`, on every pg-core release and at its version)
 - **Docker Hub** (pg-pkg)
 - **GitHub Releases** (FFI native libraries)
 

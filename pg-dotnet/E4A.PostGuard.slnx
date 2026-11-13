@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="src/E4A.PostGuard.csproj" />
+  <Project Path="tests/E4A.PostGuard.Tests/E4A.PostGuard.Tests.csproj" />
+</Solution>
