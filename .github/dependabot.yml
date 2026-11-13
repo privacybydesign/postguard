@@ -60,3 +60,13 @@ updates:
       pg-compat-js: { patterns: ["*"], update-types: [minor, patch] }
       pg-compat-js-security: { applies-to: security-updates, patterns: ["*"] }
     cooldown: { default-days: 7 }
+
+  # The .NET SDK. Its version is pg-core's and is not a dependency, so there
+  # is nothing here for a bot to leave alone.
+  - package-ecosystem: nuget
+    directory: /pg-dotnet
+    schedule: { interval: weekly, day: monday }
+    groups:
+      nuget: { patterns: ["*"], update-types: [minor, patch] }
+      nuget-security: { applies-to: security-updates, patterns: ["*"] }
+    cooldown: { default-days: 7 }

@@ -98,6 +98,35 @@ jobs:
       - if: ${{ matrix.crate != 'pg-core' && matrix.crate != 'cryptify' }}
         run: cargo clippy --manifest-path ${{ matrix.crate }}/Cargo.toml --all-targets --all-features -- -D warnings
 
+  # The .NET SDK (#256). pg-dotnet is not a cargo crate, so the matrices above
+  # do not reach it. The native library is built here, from this commit, and
+  # NativeLibraryTests calls into it: a pg-ffi change that breaks the binding
+  # is red on the PR that makes it, not in the next published package.
+  dotnet:
+    name: .NET SDK
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - name: Install Rust toolchain
+        shell: bash
+        run: |
+          rustup toolchain install stable --profile minimal --no-self-update
+          rustup default stable
+      - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
+        with:
+          dotnet-version: |
+            8.0.x
+            10.0.x
+      # Builds pg-ffi and copies it to pg-dotnet/src/runtimes/linux-x64/native.
+      - name: Build the native library
+        run: pg-ffi/build.sh
+      - name: Build
+        run: dotnet build pg-dotnet/E4A.PostGuard.slnx --configuration Release
+      - name: Test
+        run: dotnet test pg-dotnet/E4A.PostGuard.slnx --configuration Release --no-build
+
   test-wasm-browsers:
     name: Run wasm tests in browsers
     strategy:
@@ -561,6 +590,14 @@ jobs:
       - name: Test the ruleset-drift reporter
         shell: bash
         run: scripts/ruleset-drift-report-test.sh
+
+      - name: Test the NuGet login script
+        shell: bash
+        run: scripts/nuget-login-test.sh
+
+      - name: Test the NuGet package checker
+        shell: bash
+        run: scripts/nupkg-check-test.sh
 
       - name: Test the map-budget checker
         shell: bash

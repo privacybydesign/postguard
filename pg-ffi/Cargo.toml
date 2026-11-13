@@ -2,7 +2,7 @@
 name = "pg-ffi"
 version = "0.1.3"
 edition = "2021"
-description = "C ABI wrapper around pg-core for PostGuard .NET SDK"
+description = "C ABI wrapper around pg-core for the PostGuard .NET SDK (pg-dotnet)"
 license = "MIT"
 repository = "https://github.com/privacybydesign/postguard"
 
@@ -10,7 +10,11 @@ repository = "https://github.com/privacybydesign/postguard"
 crate-type = ["cdylib", "staticlib"]
 
 [dependencies]
-pg-core = { path = "../pg-core", version = "0.6", features = ["rust", "stream"] }
+# Exact on purpose: the native library is what E4A.PostGuard ships, and that
+# package is published at pg-core's version. With `=`, a pg-core release cannot
+# leave this manifest untouched, so it cannot leave pg-ffi unreleased either.
+# pg-core/tests/ffi_pin.rs holds the line to this shape.
+pg-core = { path = "../pg-core", version = "=0.6.10", features = ["rust", "stream"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 rand = "0.8"
