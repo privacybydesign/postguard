@@ -107,9 +107,9 @@ ships.
 Read support for stored artifacts is not part of this window. It never drops,
 whatever happens to the SDK version that wrote the bytes.
 
-No window is declared for `pg-cli` or `pg-ffi`. `pg-ffi` consumers pin an
-exact release rather than building against the latest one
-([postguard-dotnet#50]).
+No window is declared for `pg-cli` or `pg-ffi`. `pg-ffi`'s one consumer is
+`pg-dotnet` in this repository, which packs the library built from the same
+commit ([#256]); nothing pins a `pg-ffi` release any more.
 
 ## Reader list
 
@@ -237,6 +237,6 @@ Skipping step 2 is how you break the consumers you cannot see.
 [postguard-e2e#21]: https://github.com/privacybydesign/postguard-e2e/issues/21
 [postguard-e2e#25]: https://github.com/privacybydesign/postguard-e2e/issues/25
 [postguard-e2e#41]: https://github.com/privacybydesign/postguard-e2e/pull/41
-[postguard-dotnet#50]: https://github.com/encryption4all/postguard-dotnet/issues/50
+[#256]: https://github.com/privacybydesign/postguard/issues/256
 [postguard-outlook-addon#125]: https://github.com/encryption4all/postguard-outlook-addon/issues/125
 [postguard-ops#71]: https://github.com/privacybydesign/postguard-ops/issues/71

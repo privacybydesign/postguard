@@ -1296,3 +1296,132 @@ fn the_wasm_browser_timeout_is_pinned_above_safaris_observed_tail() {
          only a check on the literal value catches a later edit drifting it back down",
     );
 }
+
+/// The fold's whole point (#256): `E4A.PostGuard` is packed around the
+/// `pg-ffi` libraries built in the same workflow run, so the package cannot
+/// carry a native library from any commit but its own. Before the fold the SDK
+/// downloaded a pinned `pg-ffi` release, and the pin sat eight `pg-core` patch
+/// releases behind `main` with every check green.
+///
+/// What would undo that is small and would look reasonable in review: a
+/// `gh release download` to "reuse the released binaries", or a pack job that
+/// no longer waits for `build-ffi`. Either brings back a lookup by tag, and
+/// with it the question of which tag.
+#[test]
+fn the_dotnet_package_is_packed_from_this_runs_native_libraries() {
+    let workflow = workflow(DELIVERY_WORKFLOW);
+
+    let pack = job(&workflow, "pack-dotnet", DELIVERY_WORKFLOW);
+    assert_eq!(
+        field(&pack, "needs").as_deref(),
+        Some("build-ffi"),
+        "pack-dotnet no longer takes its native libraries from this run's build-ffi matrix",
+    );
+    step_with(&steps(&pack), "scripts/nupkg-check.sh", DELIVERY_WORKFLOW);
+
+    let publish = job(&workflow, "publish-dotnet", DELIVERY_WORKFLOW);
+    let needs = field(&publish, "needs").unwrap_or_default();
+    assert!(
+        needs.contains("pack-dotnet") && needs.contains("release-plz-release"),
+        "publish-dotnet needs {needs:?}; it must publish the package pack-dotnet built in \
+         this run, on the release release-plz made in this run",
+    );
+
+    for (id, body) in [("pack-dotnet", &pack), ("publish-dotnet", &publish)] {
+        assert!(
+            !body.contains("gh release download"),
+            "{id} downloads a released pg-ffi again instead of using this run's (#256)",
+        );
+    }
+    assert!(
+        !publish.contains("dotnet pack"),
+        "publish-dotnet packs a package of its own instead of publishing the one \
+         pack-dotnet built and checked",
+    );
+}
+
+/// `E4A.PostGuard` has no version of its own: `pg-dotnet/CHANGELOG.md` and its
+/// README send a reader to `pg-core`'s changelog for the same number. Same
+/// premise, same reason to pin it, as
+/// [`the_wasm_publish_still_takes_its_version_from_pg_core`]. The csproj reads
+/// the version from `pg-core/Cargo.toml`; this is the check, immediately
+/// before the publish, that the package it produced is at the version
+/// release-plz released.
+///
+/// The `environment:` is pinned with it because the trusted-publishing policy
+/// on nuget.org names it. Without it the policy would have to name the
+/// workflow file alone, and every job in `delivery.yml` with `id-token: write`
+/// could mint a NuGet publish key.
+#[test]
+fn the_dotnet_publish_is_held_to_the_pg_core_release() {
+    let publish = job(
+        &workflow(DELIVERY_WORKFLOW),
+        "publish-dotnet",
+        DELIVERY_WORKFLOW,
+    );
+
+    assert_eq!(
+        field(&publish, "if").as_deref(),
+        Some("needs.release-plz-release.outputs.pg_core_version != ''"),
+        "publish-dotnet no longer runs on exactly the pg-core releases",
+    );
+    assert_eq!(
+        field(&publish, "environment").as_deref(),
+        Some("nuget"),
+        "publish-dotnet lost its `environment: nuget`, which the nuget.org \
+         trusted-publishing policy is scoped to",
+    );
+
+    let steps = steps(&publish);
+    let check = step_with(&steps, "scripts/nupkg-check.sh", DELIVERY_WORKFLOW);
+    assert!(
+        check.contains("needs.release-plz-release.outputs.pg_core_version")
+            && check.contains(r#"scripts/nupkg-check.sh "$RUNNER_TEMP/nupkg" "$PG_CORE_VERSION""#),
+        "publish-dotnet no longer checks the package's version against the pg-core release \
+         before pushing it",
+    );
+
+    let position = |needle: &str| {
+        steps
+            .iter()
+            .position(|step| step.contains(needle))
+            .unwrap_or_else(|| panic!("publish-dotnet has no step containing {needle:?}"))
+    };
+    assert!(
+        position("scripts/nupkg-check.sh") < position("dotnet nuget push"),
+        "publish-dotnet pushes the package before checking it",
+    );
+}
+
+/// The .NET lane (#256): `pg-dotnet` is not a cargo crate, so the per-crate
+/// matrices never reach it. The job builds `pg-ffi` from the checkout before
+/// it tests, which is what lets `NativeLibraryTests` hold the binding against
+/// the native library of the same commit.
+#[test]
+fn the_dotnet_lane_tests_against_the_native_library_it_just_built() {
+    let job = job(&workflow(BUILD_WORKFLOW), "dotnet", BUILD_WORKFLOW);
+    let steps = steps(&job);
+
+    let position = |needle: &str| {
+        steps
+            .iter()
+            .position(|step| step.contains(needle))
+            .unwrap_or_else(|| panic!("the dotnet job has no step containing {needle:?}"))
+    };
+    assert!(
+        position("pg-ffi/build.sh") < position("dotnet test pg-dotnet/E4A.PostGuard.slnx"),
+        "the dotnet job must build pg-ffi from this checkout before it runs the .NET tests",
+    );
+}
+
+/// The two scripts the NuGet publish runs only on a release, same reasoning as
+/// [`the_wasm_package_checkers_self_test_runs_in_ci`]: a release is the wrong
+/// moment to learn that a branch of either was never exercised.
+#[test]
+fn the_dotnet_publish_scripts_self_tests_run_in_ci() {
+    let job = job(&workflow(BUILD_WORKFLOW), "ruleset-drift", BUILD_WORKFLOW);
+    let steps = steps(&job);
+
+    step_with(&steps, "scripts/nuget-login-test.sh", BUILD_WORKFLOW);
+    step_with(&steps, "scripts/nupkg-check-test.sh", BUILD_WORKFLOW);
+}

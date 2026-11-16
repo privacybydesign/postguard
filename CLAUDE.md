@@ -13,6 +13,8 @@ other PostGuard tools and SDKs depend on this."*
 - `pg-pkg` — the Private Key Generator, an actix-web HTTP server.
 - `pg-wasm`, `pg-cli`, `pg-ffi` — the WebAssembly bindings, the command-line
   tool, the C ABI.
+- `pg-dotnet` — the .NET SDK (`E4A.PostGuard` on NuGet), sending only, over
+  `pg-ffi`. Not a cargo crate; published at `pg-core`'s version.
 - `cryptify/` — file storage and delivery, folded in from the archived
   `cryptify` repo.
 - `pg-compat`, `pg-compat-js` — the wire-compatibility gate: bytes sealed by
@@ -23,8 +25,8 @@ cargo command run from the root does not reach them.
 
 ## What a change here reaches
 
-- A wire-format or `/v2` change reaches `postguard-js`, `postguard-dotnet`,
-  `postguard-business` and `postguard-e2e` at once. `COMPATIBILITY.md` holds
+- A wire-format or `/v2` change reaches `postguard-js`, `postguard-business`
+  and `postguard-e2e` at once. `COMPATIBILITY.md` holds
   what those consumers may rely on (`/v2` stability, the archival read
   guarantee, the SDK support windows, the deprecation process) and is the
   document such a change has to argue against, not a formality.

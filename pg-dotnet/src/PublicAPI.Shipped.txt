@@ -1,0 +1,100 @@
+#nullable enable
+E4A.PostGuard.Exceptions.NetworkException
+E4A.PostGuard.Exceptions.NetworkException.NetworkException(int statusCode, string! body, string! url) -> void
+E4A.PostGuard.Exceptions.NetworkException.StatusCode.get -> int
+E4A.PostGuard.Exceptions.NetworkException.Url.get -> string!
+E4A.PostGuard.Exceptions.PostGuardException
+E4A.PostGuard.Exceptions.PostGuardException.PostGuardException(string! message) -> void
+E4A.PostGuard.Exceptions.PostGuardException.PostGuardException(string! message, System.Exception! inner) -> void
+E4A.PostGuard.Exceptions.SealException
+E4A.PostGuard.Exceptions.SealException.SealException(string! message) -> void
+E4A.PostGuard.Models.ApiKeySign
+E4A.PostGuard.Models.ApiKeySign.ApiKey.get -> string!
+E4A.PostGuard.Models.EncryptInput
+E4A.PostGuard.Models.EncryptInput.EncryptInput() -> void
+E4A.PostGuard.Models.EncryptInput.Files.get -> System.Collections.Generic.IReadOnlyList<E4A.PostGuard.Models.PgFile!>!
+E4A.PostGuard.Models.EncryptInput.Files.init -> void
+E4A.PostGuard.Models.EncryptInput.Recipients.get -> System.Collections.Generic.IReadOnlyList<E4A.PostGuard.Models.RecipientBuilder!>!
+E4A.PostGuard.Models.EncryptInput.Recipients.init -> void
+E4A.PostGuard.Models.EncryptInput.Sign.get -> E4A.PostGuard.Models.SignMethod!
+E4A.PostGuard.Models.EncryptInput.Sign.init -> void
+E4A.PostGuard.Models.NotifyOptions
+E4A.PostGuard.Models.NotifyOptions.Language.get -> string!
+E4A.PostGuard.Models.NotifyOptions.Language.init -> void
+E4A.PostGuard.Models.NotifyOptions.Message.get -> string?
+E4A.PostGuard.Models.NotifyOptions.Message.init -> void
+E4A.PostGuard.Models.NotifyOptions.NotifyOptions() -> void
+E4A.PostGuard.Models.NotifyOptions.Recipients.get -> bool
+E4A.PostGuard.Models.NotifyOptions.Recipients.init -> void
+E4A.PostGuard.Models.NotifyOptions.Sender.get -> bool
+E4A.PostGuard.Models.NotifyOptions.Sender.init -> void
+E4A.PostGuard.Models.PgFile
+E4A.PostGuard.Models.PgFile.Content.get -> System.IO.Stream!
+E4A.PostGuard.Models.PgFile.Content.init -> void
+E4A.PostGuard.Models.PgFile.Deconstruct(out string! Name, out System.IO.Stream! Content) -> void
+E4A.PostGuard.Models.PgFile.Name.get -> string!
+E4A.PostGuard.Models.PgFile.Name.init -> void
+E4A.PostGuard.Models.PgFile.PgFile(E4A.PostGuard.Models.PgFile! original) -> void
+E4A.PostGuard.Models.PgFile.PgFile(string! Name, System.IO.Stream! Content) -> void
+E4A.PostGuard.Models.RecipientBuilder
+E4A.PostGuard.Models.RecipientBuilder.Email.get -> string!
+E4A.PostGuard.Models.RecipientBuilder.ExtraAttribute(string! type, string! value) -> E4A.PostGuard.Models.RecipientBuilder!
+E4A.PostGuard.Models.SignMethod
+E4A.PostGuard.Models.UploadOptions
+E4A.PostGuard.Models.UploadOptions.Notify.get -> E4A.PostGuard.Models.NotifyOptions?
+E4A.PostGuard.Models.UploadOptions.Notify.init -> void
+E4A.PostGuard.Models.UploadOptions.UploadOptions() -> void
+E4A.PostGuard.Models.UploadResult
+E4A.PostGuard.Models.UploadResult.Deconstruct(out string! Uuid) -> void
+E4A.PostGuard.Models.UploadResult.UploadResult(E4A.PostGuard.Models.UploadResult! original) -> void
+E4A.PostGuard.Models.UploadResult.UploadResult(string! Uuid) -> void
+E4A.PostGuard.Models.UploadResult.Uuid.get -> string!
+E4A.PostGuard.Models.UploadResult.Uuid.init -> void
+E4A.PostGuard.PostGuard
+E4A.PostGuard.PostGuard.Dispose() -> void
+E4A.PostGuard.PostGuard.Encrypt(E4A.PostGuard.Models.EncryptInput! input) -> E4A.PostGuard.Sealed!
+E4A.PostGuard.PostGuard.PostGuard(E4A.PostGuard.PostGuardConfig! config) -> void
+E4A.PostGuard.PostGuard.Recipient.get -> E4A.PostGuard.RecipientBuilders!
+E4A.PostGuard.PostGuard.Sign.get -> E4A.PostGuard.SignBuilders!
+E4A.PostGuard.PostGuardConfig
+E4A.PostGuard.PostGuardConfig.AllowInsecureUrls.get -> bool
+E4A.PostGuard.PostGuardConfig.AllowInsecureUrls.init -> void
+E4A.PostGuard.PostGuardConfig.CryptifyUrl.get -> string!
+E4A.PostGuard.PostGuardConfig.CryptifyUrl.init -> void
+E4A.PostGuard.PostGuardConfig.Headers.get -> System.Collections.Generic.Dictionary<string!, string!>?
+E4A.PostGuard.PostGuardConfig.Headers.init -> void
+E4A.PostGuard.PostGuardConfig.HttpClient.get -> System.Net.Http.HttpClient?
+E4A.PostGuard.PostGuardConfig.HttpClient.init -> void
+E4A.PostGuard.PostGuardConfig.PkgUrl.get -> string!
+E4A.PostGuard.PostGuardConfig.PkgUrl.init -> void
+E4A.PostGuard.PostGuardConfig.PostGuardConfig() -> void
+E4A.PostGuard.PostGuardConfig.Timeout.get -> System.TimeSpan?
+E4A.PostGuard.PostGuardConfig.Timeout.init -> void
+E4A.PostGuard.RecipientBuilders
+E4A.PostGuard.RecipientBuilders.Email(string! email) -> E4A.PostGuard.Models.RecipientBuilder!
+E4A.PostGuard.RecipientBuilders.EmailDomain(string! email) -> E4A.PostGuard.Models.RecipientBuilder!
+E4A.PostGuard.RecipientBuilders.RecipientBuilders() -> void
+E4A.PostGuard.Sealed
+E4A.PostGuard.Sealed.ToBytesAsync(System.Threading.CancellationToken ct = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<byte[]!>!
+E4A.PostGuard.Sealed.UploadAsync(E4A.PostGuard.Models.UploadOptions? options = null, System.Threading.CancellationToken ct = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<E4A.PostGuard.Models.UploadResult!>!
+E4A.PostGuard.SignBuilders
+E4A.PostGuard.SignBuilders.ApiKey(string! apiKey) -> E4A.PostGuard.Models.ApiKeySign!
+E4A.PostGuard.SignBuilders.SignBuilders() -> void
+override E4A.PostGuard.Models.PgFile.Equals(object? obj) -> bool
+override E4A.PostGuard.Models.PgFile.GetHashCode() -> int
+override E4A.PostGuard.Models.PgFile.ToString() -> string!
+override E4A.PostGuard.Models.UploadResult.Equals(object? obj) -> bool
+override E4A.PostGuard.Models.UploadResult.GetHashCode() -> int
+override E4A.PostGuard.Models.UploadResult.ToString() -> string!
+static E4A.PostGuard.Models.PgFile.operator !=(E4A.PostGuard.Models.PgFile? left, E4A.PostGuard.Models.PgFile? right) -> bool
+static E4A.PostGuard.Models.PgFile.operator ==(E4A.PostGuard.Models.PgFile? left, E4A.PostGuard.Models.PgFile? right) -> bool
+static E4A.PostGuard.Models.UploadResult.operator !=(E4A.PostGuard.Models.UploadResult? left, E4A.PostGuard.Models.UploadResult? right) -> bool
+static E4A.PostGuard.Models.UploadResult.operator ==(E4A.PostGuard.Models.UploadResult? left, E4A.PostGuard.Models.UploadResult? right) -> bool
+virtual E4A.PostGuard.Models.PgFile.<Clone>$() -> E4A.PostGuard.Models.PgFile!
+virtual E4A.PostGuard.Models.PgFile.EqualityContract.get -> System.Type!
+virtual E4A.PostGuard.Models.PgFile.Equals(E4A.PostGuard.Models.PgFile? other) -> bool
+virtual E4A.PostGuard.Models.PgFile.PrintMembers(System.Text.StringBuilder! builder) -> bool
+virtual E4A.PostGuard.Models.UploadResult.<Clone>$() -> E4A.PostGuard.Models.UploadResult!
+virtual E4A.PostGuard.Models.UploadResult.EqualityContract.get -> System.Type!
+virtual E4A.PostGuard.Models.UploadResult.Equals(E4A.PostGuard.Models.UploadResult? other) -> bool
+virtual E4A.PostGuard.Models.UploadResult.PrintMembers(System.Text.StringBuilder! builder) -> bool
