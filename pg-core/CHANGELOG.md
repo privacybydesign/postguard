@@ -13,6 +13,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - *(pg-dotnet)* fold the .NET SDK into this repository ([#476](https://github.com/privacybydesign/postguard/pull/476))
 
+### Fixed
+
+- *(pg-dotnet)* send the exclusive `Content-Range` end Cryptify expects on a chunk upload; `E4A.PostGuard` 0.6.0 sent the inclusive form, which the server answers with 400 ([#476](https://github.com/privacybydesign/postguard/pull/476))
+
 ### Other
 
 - add the shared status checks after the move to privacybydesign ([#464](https://github.com/privacybydesign/postguard/pull/464))
