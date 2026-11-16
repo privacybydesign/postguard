@@ -76,11 +76,12 @@ public class CryptifyClientTests
         var puts = handler.Requests.Where(r => r.Method == HttpMethod.Put).ToList();
         Assert.Equal(2, puts.Count);
 
-        // RFC 9110 §14.4: the range-end is inclusive (the last byte index of the
-        // chunk), so a chunk covering bytes [offset, end) is reported as
-        // `offset-(end-1)`. See encryption4all/postguard-dotnet#34.
-        Assert.Equal($"bytes 0-{ChunkSize - 1}/*", puts[0].ContentRange);
-        Assert.Equal($"bytes {ChunkSize}-{total - 1}/*", puts[1].ContentRange);
+        // Cryptify reads the range end as exclusive (`end - start` is the chunk
+        // length), so a chunk covering bytes [offset, end) is reported as
+        // `offset-end`. encryption4all/postguard-dotnet#34 made this inclusive
+        // per RFC 9110, which the server rejects.
+        Assert.Equal($"bytes 0-{ChunkSize}/*", puts[0].ContentRange);
+        Assert.Equal($"bytes {ChunkSize}-{total}/*", puts[1].ContentRange);
     }
 
     [Fact]

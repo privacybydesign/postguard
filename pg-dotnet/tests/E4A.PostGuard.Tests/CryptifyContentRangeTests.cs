@@ -59,18 +59,19 @@ public class CryptifyContentRangeTests
         [new RecipientBuilder("alice@example.com", RecipientBaseType.Email)];
 
     [Fact]
-    public async Task StoreChunk_EmitsInclusiveEndByte()
+    public async Task StoreChunk_EmitsExclusiveEndByte()
     {
         var handler = new RecordingHandler();
         using var http = new HttpClient(handler);
         var client = new CryptifyClient(http, "https://cryptify.example/");
 
-        // Single 5-byte chunk: bytes 0..4 inclusive.
+        // Single 5-byte chunk at offset 0.
         await client.UploadAsync(new byte[] { 1, 2, 3, 4, 5 }, Recipient(), null);
 
-        // Not "bytes 0-5/*": RFC 9110 §14.4 range-end is inclusive, so the last
-        // byte of a 5-byte chunk is index 4.
-        Assert.Equal("bytes 0-4/*", Assert.Single(handler.ChunkRanges));
+        // Not "bytes 0-4/*": Cryptify's upload_chunk requires the body to be exactly
+        // `end - start` bytes, so the end is one past the last byte. The RFC 9110
+        // inclusive form is answered with 400 "Data not complete".
+        Assert.Equal("bytes 0-5/*", Assert.Single(handler.ChunkRanges));
     }
 
     [Fact]
@@ -84,10 +85,11 @@ public class CryptifyContentRangeTests
         await client.UploadAsync(new byte[ChunkSize + 1], Recipient(), null);
 
         Assert.Equal(2, handler.ChunkRanges.Count);
-        // First chunk: inclusive end is ChunkSize - 1, not ChunkSize.
-        Assert.Equal($"bytes 0-{ChunkSize - 1}/*", handler.ChunkRanges[0]);
-        // Second chunk starts at ChunkSize — one past the first chunk's inclusive
-        // end, so the ranges are contiguous with no overlapping byte.
-        Assert.Equal($"bytes {ChunkSize}-{ChunkSize}/*", handler.ChunkRanges[1]);
+        // First chunk: exclusive end is ChunkSize.
+        Assert.Equal($"bytes 0-{ChunkSize}/*", handler.ChunkRanges[0]);
+        // Second chunk starts where the first one ended. Its one byte is
+        // `ChunkSize-(ChunkSize + 1)`; the inclusive `ChunkSize-ChunkSize` is
+        // rejected by the server as `start >= end`.
+        Assert.Equal($"bytes {ChunkSize}-{ChunkSize + 1}/*", handler.ChunkRanges[1]);
     }
 }

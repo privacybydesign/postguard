@@ -94,10 +94,12 @@ internal class CryptifyClient
             Content = new ByteArrayContent(data, offset, end - offset)
         };
         request.Content.Headers.ContentType = new MediaTypeHeaderValue("application/octet-stream");
-        // `end` is the exclusive end index of the chunk; RFC 9110 §14.4 range-end
-        // is inclusive, so emit the last byte index (end - 1). `end > offset`
-        // always holds here (chunkLen >= 1), so this never goes negative.
-        request.Content.Headers.Add("Content-Range", $"bytes {offset}-{end - 1}/*");
+        // Cryptify takes the chunk length to be `end - start`, so the range end is
+        // EXCLUSIVE here, not RFC 9110's inclusive last byte (cryptify/CLAUDE.md,
+        // "Content-Range end byte is EXCLUSIVE"); postguard-js sends the same.
+        // The inclusive form gets a 400 from the server: "Data not complete", or
+        // "Incorrect Content-Range header" for a one-byte chunk.
+        request.Content.Headers.Add("Content-Range", $"bytes {offset}-{end}/*");
         request.Headers.TryAddWithoutValidation("cryptifytoken", token);
 
         var response = await _http.SendAsync(request, ct);
