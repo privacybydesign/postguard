@@ -867,6 +867,43 @@ fn the_wasm_publish_still_takes_its_version_from_pg_core() {
     );
 }
 
+/// `@e4a/pg-wasm` is published through npm trusted publishing: npm trades the
+/// job's OIDC identity for a short-lived credential, so there is no
+/// `NPM_TOKEN` to leak, rotate, or forget to copy when the repo changes owner
+/// (which is how the 0.6.11 publish failed with `ENEEDAUTH`). Two things make
+/// that work and both are easy to undo without noticing: the job must be
+/// allowed to mint the OIDC token, and it must not hand npm a token of its
+/// own, because a set `NODE_AUTH_TOKEN` is what npm uses instead.
+#[test]
+fn the_wasm_publish_authenticates_by_oidc_and_carries_no_token() {
+    let job = job(
+        &workflow(DELIVERY_WORKFLOW),
+        "publish-wasm",
+        DELIVERY_WORKFLOW,
+    );
+
+    assert!(
+        job.lines().any(|line| line.trim() == "id-token: write"),
+        "publish-wasm no longer has `id-token: write`, so npm cannot get the OIDC token trusted \
+         publishing exchanges for a publish credential",
+    );
+    for token in ["NPM_TOKEN", "NODE_AUTH_TOKEN"] {
+        assert!(
+            !job.lines()
+                .filter(|line| !line.trim_start().starts_with('#'))
+                .any(|line| line.contains(token)),
+            "publish-wasm references `{token}`: a long-lived npm token is back, and npm will use \
+             it instead of the trusted publisher",
+        );
+    }
+    assert!(
+        !job.lines()
+            .any(|line| line.trim_start().starts_with("environment:")),
+        "publish-wasm has an `environment:`; the trusted publisher on npmjs.com is configured \
+         without one, so the OIDC claim no longer matches and the publish is refused",
+    );
+}
+
 /// The npm page has served the literal placeholder `ERROR: No README data
 /// found!` since this package's first release (#427), because `Assemble
 /// package` never copied one in and always wrote its manifest from a

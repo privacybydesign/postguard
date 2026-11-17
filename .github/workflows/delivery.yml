@@ -709,10 +709,20 @@ jobs:
           node-version: '24'
           registry-url: 'https://registry.npmjs.org'
 
+      # No token: npm exchanges this job's OIDC identity (`id-token: write`
+      # above) for a short-lived publish credential, against the trusted
+      # publisher configured on npmjs.com for `@e4a/pg-wasm` (repository
+      # privacybydesign/postguard, workflow delivery.yml, no environment).
+      # Renaming this file or giving this job an environment breaks that match.
+      # Trusted publishing needs npm 11.5.1 or newer; an older npm would fall
+      # through to ENEEDAUTH, which says nothing about why.
       - name: Set version and publish
         working-directory: pg-wasm/pkg
         run: |
+          npm_version="$(npm --version)"
+          if [ "$(printf '%s\n' 11.5.1 "$npm_version" | sort -V | head -n1)" != 11.5.1 ]; then
+            echo "::error::npm $npm_version is older than 11.5.1, which trusted publishing requires"
+            exit 1
+          fi
           npm version "${{ needs.release-plz-release.outputs.pg_core_version }}" --no-git-tag-version
           npm publish --provenance --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
