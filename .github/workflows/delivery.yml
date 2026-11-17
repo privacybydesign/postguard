@@ -259,7 +259,11 @@ jobs:
   finalize-docker:
     name: Finalize Docker manifest
     needs: [build, scan-docker, release-plz-release]
-    if: always() && needs.build.result == 'success'
+    # always(): release-plz-release is skipped on a pull request, and a
+    # skipped need would otherwise skip this job too. That makes every
+    # gate explicit: without the scan's result here, a failed scan still
+    # publishes the manifest (#462).
+    if: always() && needs.build.result == 'success' && needs.scan-docker.result == 'success'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -417,7 +421,11 @@ jobs:
   finalize-cryptify:
     name: Finalize cryptify manifest
     needs: [build-cryptify, scan-cryptify, release-plz-release]
-    if: always() && needs.build-cryptify.result == 'success'
+    # always(): release-plz-release is skipped on a pull request, and a
+    # skipped need would otherwise skip this job too. That makes every
+    # gate explicit: without the scan's result here, a failed scan still
+    # publishes the manifest (#462).
+    if: always() && needs.build-cryptify.result == 'success' && needs.scan-cryptify.result == 'success'
     runs-on: ubuntu-latest
     permissions:
       contents: read

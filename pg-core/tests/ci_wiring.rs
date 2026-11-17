@@ -867,6 +867,34 @@ fn the_wasm_publish_still_takes_its_version_from_pg_core() {
     );
 }
 
+/// Both image manifests are published by a job that runs under `always()`,
+/// because `release-plz-release` is skipped on a pull request and a skipped
+/// need would skip the job with it. Under `always()` a need gates nothing by
+/// being listed: only a result named in the `if:` does. The scan was listed
+/// and not named, so a scan that failed on a fixable critical still published
+/// the image (#462). This holds each manifest job to its scan's result.
+#[test]
+fn an_image_manifest_is_not_published_past_a_failed_scan() {
+    let delivery = workflow(DELIVERY_WORKFLOW);
+    for (finalize, scan) in [
+        ("finalize-docker", "scan-docker"),
+        ("finalize-cryptify", "scan-cryptify"),
+    ] {
+        let job = job(&delivery, finalize, DELIVERY_WORKFLOW);
+        let condition = job
+            .lines()
+            .map(str::trim)
+            .find(|line| line.starts_with("if:"))
+            .unwrap_or_else(|| panic!("{finalize} has no job-level `if:`"));
+        let gate = format!("needs.{scan}.result == 'success'");
+        assert!(
+            condition.contains(&gate),
+            "{finalize}'s condition is `{condition}`, which does not require `{gate}`: under \
+             `always()` a failed scan no longer stops the manifest from being published",
+        );
+    }
+}
+
 /// `@e4a/pg-wasm` is published through npm trusted publishing: npm trades the
 /// job's OIDC identity for a short-lived credential, so there is no
 /// `NPM_TOKEN` to leak, rotate, or forget to copy when the repo changes owner
