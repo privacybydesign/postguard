@@ -883,7 +883,7 @@ fn the_wasm_publish_authenticates_by_oidc_and_carries_no_token() {
     );
 
     assert!(
-        job.contains("id-token: write"),
+        job.lines().any(|line| line.trim() == "id-token: write"),
         "publish-wasm no longer has `id-token: write`, so npm cannot get the OIDC token trusted \
          publishing exchanges for a publish credential",
     );
