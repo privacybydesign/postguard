@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.13](https://github.com/privacybydesign/postguard/compare/pg-core-v0.6.12...pg-core-v0.6.13) - 2026-11-17
+
+### Other
+
+- do not publish an image manifest past a failed scan ([#484](https://github.com/privacybydesign/postguard/pull/484))
+
 ## [0.6.12](https://github.com/privacybydesign/postguard/compare/pg-core-v0.6.11...pg-core-v0.6.12) - 2026-11-17
 
 ### Other
