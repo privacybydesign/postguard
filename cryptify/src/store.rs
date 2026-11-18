@@ -3,7 +3,7 @@ use crate::metrics::Metrics;
 
 use std::{
     collections::{BTreeMap, HashMap, VecDeque},
-    path::Path,
+    path::{Path, PathBuf},
     sync::Arc,
     time::Duration,
 };
@@ -12,8 +12,9 @@ use rocket::tokio::{sync::Notify, time::Instant};
 
 /// Default idle window for an in-memory upload session when no value is
 /// provided in config. Each successful chunk PUT resets it; if no activity
-/// is seen for this long the session is evicted (the on-disk file is left
-/// alone — `FileState.expires` covers that).
+/// is seen for this long the session is evicted. The file of a session that
+/// never finalized goes with it; a finalized upload's file stays until
+/// `retention` removes it.
 #[cfg(test)]
 pub const DEFAULT_UPLOAD_SESSION_IDLE_TIMEOUT_SECS: u64 = 60 * 60;
 
@@ -777,6 +778,10 @@ struct SharedState {
     /// `None` keeps both in memory only (the pre-persistence behaviour, used
     /// by unit tests and when `usage_db` is unset in config).
     db: Option<StateDb>,
+    /// Where the handlers write upload files, so evicting a session that never
+    /// finalized can take its partial file with it. Empty in unit tests that
+    /// have no upload directory, and then no file is ever touched.
+    data_dir: PathBuf,
 }
 
 pub struct Store {
@@ -810,9 +815,8 @@ impl Store {
     /// Startup is also where persisted sessions come back
     /// ([`Store::restore_sessions`]). `data_dir` is the upload directory the
     /// handlers write chunks into; the restore needs it to delete the partial
-    /// file of a session that expired while the process was down. It is
-    /// unused when `db_path` is `None`, since without a database there is
-    /// nothing to restore from.
+    /// file of a session that expired while the process was down, and the
+    /// purge task to delete the partial file of one it evicts while running.
     pub fn with_idle_ttl(
         idle_ttl: Duration,
         metrics: Arc<Metrics>,
@@ -854,6 +858,7 @@ impl Store {
                 rolling_window_secs,
                 metrics,
                 db,
+                data_dir: data_dir.to_path_buf(),
             }),
         };
 
@@ -1129,6 +1134,7 @@ impl Drop for Store {
 impl SharedState {
     fn purge_expired(&self) -> Option<Instant> {
         let mut evicted: Vec<String> = Vec::new();
+        let mut unfinalized: Vec<String> = Vec::new();
 
         let next_deadline = {
             let mut state = self.state.lock().unwrap(); // this will only panic if we already panicked elsewhere while holding the mutex, which is fine.
@@ -1159,6 +1165,7 @@ impl SharedState {
                         .unwrap_or(false);
                     if was_unfinalized {
                         self.metrics.record_expired();
+                        unfinalized.push(id.clone());
                     }
                 }
                 state.expiration_keys.remove(&id);
@@ -1173,6 +1180,29 @@ impl SharedState {
         if let Some(db) = &self.db {
             for id in &evicted {
                 db.delete_session(id);
+            }
+        }
+
+        // The partial file of a session that never reached finalize. Nobody
+        // can resume it once the session is gone and nobody was ever told its
+        // address, so it is the same orphan `restore_sessions` removes for a
+        // session that expired while the process was down. A finalized
+        // upload's file is not touched here: it has to stay downloadable long
+        // after its session idles out, and `retention` removes it on expiry.
+        //
+        // A session whose lock was held at eviction counts as finalized above
+        // (`unwrap_or(false)`), so a file is never removed on a guess; the
+        // retention sweep collects that one later.
+        if !self.data_dir.as_os_str().is_empty() {
+            for id in &unfinalized {
+                match std::fs::remove_file(self.data_dir.join(id)) {
+                    Ok(()) => {}
+                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                    Err(e) => log::warn!(
+                        "Could not remove the partial upload of an evicted session: {}",
+                        e
+                    ),
+                }
             }
         }
 
@@ -1824,6 +1854,55 @@ mod tests {
 
     fn partial_exists(db: &TempDbPath, uuid: &str) -> bool {
         db.data_dir().join(uuid).exists()
+    }
+
+    /// Wait until the purge task has evicted `id`, or give up after a second.
+    async fn evicted(store: &Store, id: &str) -> bool {
+        for _ in 0..100 {
+            if store.get(id).is_none() {
+                return true;
+            }
+            rocket::tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        false
+    }
+
+    /// The running half of what `restore_sessions` does at boot: a session
+    /// that idles out before finalize leaves nothing on disk.
+    #[rocket::async_test]
+    async fn evicting_an_unfinalized_session_removes_its_partial_file() {
+        let db = TempDbPath::new();
+        let store = store_with_db_and_ttl(&db, Duration::from_millis(20), 14 * 24 * 60 * 60);
+        write_partial(&db, "abandoned");
+        store.create("abandoned".into(), dummy_filestate());
+
+        assert!(evicted(&store, "abandoned").await);
+        // The unlink follows the eviction, outside the state lock.
+        for _ in 0..100 {
+            if !partial_exists(&db, "abandoned") {
+                break;
+            }
+            rocket::tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        assert!(!partial_exists(&db, "abandoned"));
+    }
+
+    /// A finalized upload has to outlive its session by days: the recipient
+    /// downloads it long after the hour-long idle window. Evicting the session
+    /// must leave the file to the retention sweep.
+    #[rocket::async_test]
+    async fn evicting_a_finalized_session_keeps_its_file() {
+        let db = TempDbPath::new();
+        let store = store_with_db_and_ttl(&db, Duration::from_millis(20), 14 * 24 * 60 * 60);
+        write_partial(&db, "delivered");
+        let mut finalized = dummy_filestate();
+        finalized.sender = Some("sender@example.com".into());
+        store.create("delivered".into(), finalized);
+
+        assert!(evicted(&store, "delivered").await);
+        // Long enough for an unlink to have happened if one were coming.
+        rocket::tokio::time::sleep(Duration::from_millis(100)).await;
+        assert!(partial_exists(&db, "delivered"));
     }
 
     #[rocket::async_test]

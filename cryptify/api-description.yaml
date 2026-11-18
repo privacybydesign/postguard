@@ -700,7 +700,10 @@ paths:
         interrupted download can resume: `Accept-Ranges: bytes` is advertised
         on every response that reaches the file (200, 206 and 416, but not the
         404), a single `Range` is answered with 206, and an unsatisfiable one
-        with 416. The server does not set a `Content-Type` on the body."
+        with 416. The server does not set a `Content-Type` on the body.
+        A file is available for 14 days from the start of its upload; after
+        that the answer is 404, as it is for any identifier that is not a
+        hyphenated lower-case UUID."
       operationId: "downloadFile"
       parameters:
       - in: "path"

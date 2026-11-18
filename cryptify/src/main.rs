@@ -3,6 +3,7 @@ mod data_dir;
 mod email;
 mod error;
 mod metrics;
+mod retention;
 mod store;
 mod upload_file;
 
@@ -498,7 +499,7 @@ async fn upload_init(
         FileState {
             cryptify_token: init_cryptify_token.clone(),
             uploaded: 0,
-            expires: current_time + 1_209_600,
+            expires: current_time + retention::UPLOAD_RETENTION_SECS as i64,
             recipients: recipient,
             mail_content: request.mail_content.clone(),
             mail_lang: request.mail_lang.clone(),
@@ -1658,16 +1659,10 @@ fn parse_range_header(header: &str, total_size: u64) -> Option<ByteRange> {
 }
 
 /// Cryptify stores upload payloads as flat UUID-named files under
-/// `data_dir`. Reject anything that could escape that or address an
-/// unintended path before touching the filesystem.
+/// `data_dir`. The download route accepts exactly the name `upload_init`
+/// writes, which also rules out traversal and separators by the same test.
 fn is_safe_download_segment(name: &str) -> bool {
-    !name.is_empty()
-        && name.len() <= 128
-        && !name.contains('/')
-        && !name.contains('\\')
-        && !name.contains('\0')
-        && name != ".."
-        && name != "."
+    retention::is_upload_name(name)
 }
 
 /// Captures the inbound `Range` header (if any) without failing the request
@@ -1710,7 +1705,14 @@ async fn download(
     }
     let path = Path::new(config.data_dir()).join(filename);
     let mut file = File::open(&path).await.map_err(|_| Status::NotFound)?;
-    let total_size = file.metadata().await.map_err(|_| Status::NotFound)?.len();
+    let meta = file.metadata().await.map_err(|_| Status::NotFound)?;
+    // The expiry the notification email states is enforced here and not only
+    // by the sweep that deletes the file: the sweep runs on an interval and an
+    // unlink can fail, and neither may keep an expired link working.
+    if retention::is_expired(&meta, std::time::SystemTime::now()) {
+        return Err(Status::NotFound);
+    }
+    let total_size = meta.len();
 
     let mut builder = rocket::Response::build();
     builder.raw_header("Accept-Ranges", "bytes");
@@ -1845,6 +1847,13 @@ pub fn build_rocket(figment: Figment, vk: Parameters<VerifyingKey>) -> Rocket<Bu
         metrics.clone(),
         std::path::PathBuf::from(config.data_dir()),
         Duration::from_secs(config.metrics_scan_interval_secs()),
+    ));
+
+    // Removes uploads past retention, starting with whatever a deployment
+    // accumulated before this task existed.
+    rocket::tokio::spawn(retention::sweeper(
+        std::path::PathBuf::from(config.data_dir()),
+        retention::SWEEP_INTERVAL,
     ));
 
     let pkg_client = PkgClient::new(config.pkg_url().to_string());
@@ -3010,7 +3019,8 @@ mod tests {
 
     #[test]
     fn safe_segment_rejects_traversal_and_separators() {
-        assert!(is_safe_download_segment("abc-123"));
+        assert!(is_safe_download_segment(UPLOAD));
+        assert!(!is_safe_download_segment("abc-123"));
         assert!(!is_safe_download_segment(""));
         assert!(!is_safe_download_segment(".."));
         assert!(!is_safe_download_segment("."));
@@ -3020,6 +3030,10 @@ mod tests {
     }
 
     // ----- /filedownload integration tests -----
+
+    /// A name of the shape `upload_init` gives a file. The route serves no
+    /// other shape.
+    const UPLOAD: &str = "3f0c2f6e-6c1b-4b7e-9a51-0d8e2a4c7f10";
 
     async fn download_client(data_dir: &std::path::Path) -> Client {
         use rocket::figment::{providers::Serialized, Figment};
@@ -3087,9 +3101,12 @@ mod tests {
         let data_dir = fresh_data_dir();
         let client = download_client(&data_dir).await;
         let body: Vec<u8> = (0u8..100).collect();
-        std::fs::write(data_dir.join("file1"), &body).unwrap();
+        std::fs::write(data_dir.join(UPLOAD), &body).unwrap();
 
-        let res = client.get("/filedownload/file1").dispatch().await;
+        let res = client
+            .get(format!("/filedownload/{UPLOAD}"))
+            .dispatch()
+            .await;
         assert_eq!(res.status(), Status::Ok);
         assert_eq!(
             res.headers().get_one("Accept-Ranges"),
@@ -3108,10 +3125,10 @@ mod tests {
         let data_dir = fresh_data_dir();
         let client = download_client(&data_dir).await;
         let body: Vec<u8> = (0u8..100).collect();
-        std::fs::write(data_dir.join("file1"), &body).unwrap();
+        std::fs::write(data_dir.join(UPLOAD), &body).unwrap();
 
         let res = client
-            .get("/filedownload/file1")
+            .get(format!("/filedownload/{UPLOAD}"))
             .header(Header::new("Range", "bytes=10-19"))
             .dispatch()
             .await;
@@ -3133,10 +3150,10 @@ mod tests {
         let data_dir = fresh_data_dir();
         let client = download_client(&data_dir).await;
         let body: Vec<u8> = (0u8..100).collect();
-        std::fs::write(data_dir.join("file1"), &body).unwrap();
+        std::fs::write(data_dir.join(UPLOAD), &body).unwrap();
 
         let res = client
-            .get("/filedownload/file1")
+            .get(format!("/filedownload/{UPLOAD}"))
             .header(Header::new("Range", "bytes=80-"))
             .dispatch()
             .await;
@@ -3156,10 +3173,10 @@ mod tests {
         let data_dir = fresh_data_dir();
         let client = download_client(&data_dir).await;
         let body: Vec<u8> = (0u8..100).collect();
-        std::fs::write(data_dir.join("file1"), &body).unwrap();
+        std::fs::write(data_dir.join(UPLOAD), &body).unwrap();
 
         let res = client
-            .get("/filedownload/file1")
+            .get(format!("/filedownload/{UPLOAD}"))
             .header(Header::new("Range", "bytes=-5"))
             .dispatch()
             .await;
@@ -3179,10 +3196,10 @@ mod tests {
         let data_dir = fresh_data_dir();
         let client = download_client(&data_dir).await;
         let body: Vec<u8> = (0u8..100).collect();
-        std::fs::write(data_dir.join("file1"), &body).unwrap();
+        std::fs::write(data_dir.join(UPLOAD), &body).unwrap();
 
         let res = client
-            .get("/filedownload/file1")
+            .get(format!("/filedownload/{UPLOAD}"))
             .header(Header::new("Range", "bytes=200-300"))
             .dispatch()
             .await;
@@ -3197,8 +3214,76 @@ mod tests {
         let data_dir = fresh_data_dir();
         let client = download_client(&data_dir).await;
 
-        let res = client.get("/filedownload/nope").dispatch().await;
+        let res = client
+            .get("/filedownload/9b2f6c1e-7a44-4d0b-8f39-2c5d1e0a7b63")
+            .dispatch()
+            .await;
         assert_eq!(res.status(), Status::NotFound);
+
+        let _ = std::fs::remove_dir_all(&data_dir);
+    }
+
+    /// The route accepts the name `upload_init` writes and no other spelling,
+    /// so a file in the directory under any other name is a 404.
+    #[rocket::async_test]
+    async fn download_serves_upload_names_only() {
+        let data_dir = fresh_data_dir();
+        let client = download_client(&data_dir).await;
+        let upper = UPLOAD.to_uppercase();
+        let simple = UPLOAD.replace('-', "");
+        for name in ["file1", "abc-123", upper.as_str(), simple.as_str()] {
+            std::fs::write(data_dir.join(name), b"not an upload").unwrap();
+
+            let res = client.get(format!("/filedownload/{name}")).dispatch().await;
+            assert_eq!(res.status(), Status::NotFound, "{name} must not be served");
+        }
+        // The control: the same client does serve an upload from that
+        // directory, so the 404s above are the guard and not a broken client.
+        std::fs::write(data_dir.join(UPLOAD), b"an upload").unwrap();
+        let res = client
+            .get(format!("/filedownload/{UPLOAD}"))
+            .dispatch()
+            .await;
+        assert_eq!(res.status(), Status::Ok);
+
+        let _ = std::fs::remove_dir_all(&data_dir);
+    }
+
+    /// The notification email states an expiry date. The link has to stop
+    /// working on that date whether or not the sweep has removed the file.
+    #[rocket::async_test]
+    async fn download_refuses_an_upload_past_retention() {
+        let data_dir = fresh_data_dir();
+        let client = download_client(&data_dir).await;
+        let path = data_dir.join(UPLOAD);
+        std::fs::write(&path, b"an upload").unwrap();
+        let day = Duration::from_secs(24 * 60 * 60);
+        let set_age = |age: Duration| {
+            std::fs::File::options()
+                .write(true)
+                .open(&path)
+                .unwrap()
+                .set_modified(std::time::SystemTime::now() - age)
+                .unwrap();
+        };
+
+        set_age(13 * day);
+        let res = client
+            .get(format!("/filedownload/{UPLOAD}"))
+            .dispatch()
+            .await;
+        assert_eq!(res.status(), Status::Ok, "inside retention it is served");
+
+        set_age(15 * day);
+        let res = client
+            .get(format!("/filedownload/{UPLOAD}"))
+            .dispatch()
+            .await;
+        assert_eq!(res.status(), Status::NotFound, "past retention it is not");
+        assert!(
+            path.exists(),
+            "the route refuses; it is the sweep that deletes"
+        );
 
         let _ = std::fs::remove_dir_all(&data_dir);
     }
