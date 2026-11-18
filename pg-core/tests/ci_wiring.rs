@@ -867,6 +867,47 @@ fn the_wasm_publish_still_takes_its_version_from_pg_core() {
     );
 }
 
+/// The release PR has to be opened by the org's release App, not by
+/// `GITHUB_TOKEN`: privacybydesign forbids `GITHUB_TOKEN` to open a pull
+/// request, and one it did open would start no workflows and so carry none of
+/// its required checks (#334). `release-plz-pr` therefore hands release-plz
+/// the App token when one was minted, and falls back to `GITHUB_TOKEN` only so
+/// the job keeps working in a fork or before the secrets exist. Dropping the
+/// App half of that expression fails nothing here until the next release PR
+/// silently does not appear.
+#[test]
+fn the_release_pr_is_opened_with_the_release_app_token() {
+    let job = job(
+        &workflow(DELIVERY_WORKFLOW),
+        "release-plz-pr",
+        DELIVERY_WORKFLOW,
+    );
+    let steps = steps(&job);
+
+    let mint = step_with(
+        &steps,
+        "actions/create-github-app-token@",
+        DELIVERY_WORKFLOW,
+    );
+    for secret in ["secrets.RELEASE_APP_ID", "secrets.RELEASE_APP_PRIVATE_KEY"] {
+        assert!(
+            mint.contains(secret),
+            "release-plz-pr's App-token step no longer reads `{secret}`",
+        );
+    }
+    assert!(
+        mint.contains("id: token"),
+        "the App-token step lost `id: token`, which the release-plz step reads its token from",
+    );
+
+    let run = step_with(&steps, "command: release-pr", DELIVERY_WORKFLOW);
+    assert!(
+        run.contains("GITHUB_TOKEN: ${{ steps.token.outputs.token || secrets.GITHUB_TOKEN }}"),
+        "release-plz-pr no longer gives release-plz the release App's token first, so the \
+         release PR is opened by GITHUB_TOKEN again",
+    );
+}
+
 /// Both image manifests are published by a job that runs under `always()`,
 /// because `release-plz-release` is skipped on a pull request and a skipped
 /// need would skip the job with it. Under `always()` a need gates nothing by
