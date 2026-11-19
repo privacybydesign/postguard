@@ -1124,7 +1124,9 @@ async fn upload_finalize(
     // upload (postguard#375). After the two checks above, so a repeat is held
     // to the same token and the same declared size as the original.
     if state.finalized_at.is_some() {
-        log::info!("upload_finalize uuid={uuid} repeated after completion; nothing to do");
+        // No uuid in this line: it is the address the file is downloaded
+        // from, and the code scanner refuses a new log statement carrying it.
+        log::info!("upload_finalize repeated after completion; nothing to do");
         return Ok(());
     }
 
