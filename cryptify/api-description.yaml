@@ -355,6 +355,12 @@ paths:
       tags:
       - "File upload"
       summary: "Finalize multipart file upload and send mail to recipient"
+      description:
+        "Safe to repeat. Once a finalize has completed, the same request is
+        answered with the same 200 and has no further effect: the recipient
+        is not notified again and the upload is not charged to the rolling
+        limit again. A repeat must carry the same `CryptifyToken` and declared
+        size as the original."
       operationId: "finalizeFileUpload"
       parameters:
       - in: "header"

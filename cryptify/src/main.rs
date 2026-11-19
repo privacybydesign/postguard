@@ -490,6 +490,7 @@ async fn upload_init(
             // otherwise: the only place a `SenderClaim` is written is the
             // verification at finalize.
             sender_claim: None,
+            finalized_at: None,
         },
     );
 
@@ -1115,6 +1116,18 @@ async fn upload_finalize(
         return Err(Error::UnprocessableEntity(None));
     }
 
+    // A finalize that already completed is answered and not run again. The
+    // client repeats the request when it never saw the first response, and it
+    // gets the same 200 it would have seen. Everything below this point has
+    // happened once: the recipient has been notified and the upload has been
+    // charged to the rolling limit, and neither may happen twice for one
+    // upload (postguard#375). After the two checks above, so a repeat is held
+    // to the same token and the same declared size as the original.
+    if state.finalized_at.is_some() {
+        log::info!("upload_finalize uuid={uuid} repeated after completion; nothing to do");
+        return Ok(());
+    }
+
     let mut file = File::open(Path::new(config.data_dir()).join(uuid))
         .await
         .map_err(|e| {
@@ -1247,6 +1260,13 @@ async fn upload_finalize(
     if let Some(key) = accounting_key {
         store.record_upload(key, state.uploaded, now_secs);
     }
+
+    // Only now, with the email sent and the usage recorded: a finalize that
+    // failed before this line has to stay retryable, and one that reached it
+    // must not run again. Persisted, so a restart between the first finalize
+    // and its retry does not forget it.
+    state.finalized_at = Some(now_secs);
+    store.persist_session(uuid, &state);
 
     Ok(())
 }
@@ -2645,6 +2665,7 @@ mod tests {
             recovery_token_hash: String::new(),
             challenge: None,
             sender_claim: None,
+            finalized_at: None,
         }
     }
 
@@ -3181,6 +3202,7 @@ mod tests {
                 recovery_token_hash: String::new(),
                 challenge: None,
                 sender_claim: None,
+                finalized_at: None,
             };
             store.create(uuid.to_owned(), state);
         }
@@ -4930,8 +4952,9 @@ mod integration {
     /// A finalize can be repeated: the client retries after a lost response,
     /// or resumes after a refresh, in which case it no longer holds the
     /// challenge and cannot rebuild the header at all. Neither may erase a
-    /// proof that already succeeded, and the unproven-to-proven direction
-    /// must still work.
+    /// proof that already succeeded. A finalize that completed is settled in
+    /// the other direction too: a proof arriving afterwards changes nothing,
+    /// because the notification it would have changed has been sent.
     #[rocket::async_test]
     async fn a_retried_finalize_does_not_erase_a_proof() {
         let mut rng = rand08::thread_rng();
@@ -4994,8 +5017,128 @@ mod integration {
         assert_eq!(status, Status::Ok);
         assert_eq!(
             claim_after(uuid).await,
-            proven,
-            "a later finalize carrying a valid proof must still prove the sender"
+            Some(SenderClaim::Unproven),
+            "the upload was finalized and notified as unproven; a proof presented afterwards \
+             must not rewrite what was already sent"
+        );
+
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// postguard#375: a client that never saw the response to its finalize
+    /// sends it again. The repeat gets the same 200, and the upload is
+    /// notified once and charged once.
+    #[rocket::async_test]
+    async fn a_repeated_finalize_notifies_and_charges_once() {
+        let mut rng = rand08::thread_rng();
+        let setup = TestSetup::new(&mut rng);
+        let sealed = seal_payload(&setup, b"an upload whose finalize response was lost").await;
+        let total = sealed.len() as u64;
+        let (client, dir) = test_client(&setup).await;
+        let used = || {
+            let store = client.rocket().state::<Store>().expect("Store managed");
+            let now = chrono::offset::Utc::now().timestamp();
+            store.get_usage(&unproven_sender_key(), now).used_bytes
+        };
+
+        let (uuid, token, status) = do_init(&client, SENDER_EMAIL).await;
+        assert_eq!(status, Status::Ok);
+        let (chunk_status, token) = do_chunk(&client, &uuid, &token, &sealed, 0).await;
+        assert_eq!(chunk_status, Status::Ok);
+        assert_eq!(email::send_calls_for(&uuid), 0);
+
+        assert_eq!(do_finalize(&client, &uuid, &token, total).await, Status::Ok);
+        assert_eq!(
+            email::send_calls_for(&uuid),
+            1,
+            "the first finalize notifies"
+        );
+        assert_eq!(used(), total, "and charges the upload");
+
+        for _ in 0..2 {
+            assert_eq!(
+                do_finalize(&client, &uuid, &token, total).await,
+                Status::Ok,
+                "a repeat is answered the way the original was"
+            );
+        }
+        assert_eq!(
+            email::send_calls_for(&uuid),
+            1,
+            "a repeated finalize must not notify the recipient again"
+        );
+        assert_eq!(
+            used(),
+            total,
+            "a repeated finalize must not charge the same bytes again"
+        );
+
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// A repeat is still held to the token and the declared size. Being
+    /// finalized is not a way past either check.
+    #[rocket::async_test]
+    async fn a_repeated_finalize_is_still_authenticated() {
+        let mut rng = rand08::thread_rng();
+        let setup = TestSetup::new(&mut rng);
+        let sealed = seal_payload(&setup, b"finalized, then probed").await;
+        let total = sealed.len() as u64;
+        let (client, dir) = test_client(&setup).await;
+
+        let (uuid, token, _) = do_init(&client, SENDER_EMAIL).await;
+        let (_, token) = do_chunk(&client, &uuid, &token, &sealed, 0).await;
+        assert_eq!(do_finalize(&client, &uuid, &token, total).await, Status::Ok);
+
+        assert_ne!(
+            do_finalize(&client, &uuid, &"0".repeat(64), total).await,
+            Status::Ok,
+            "a wrong token is refused after finalize as before it"
+        );
+        assert_eq!(
+            do_finalize(&client, &uuid, &token, total + 1).await,
+            Status::UnprocessableEntity,
+            "and so is a wrong size"
+        );
+
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// The retry can land on a different process than the original: the
+    /// response was lost because the first one went away. The marker has to
+    /// come back off disk with the session.
+    #[rocket::async_test]
+    async fn a_finalize_repeated_after_a_restart_notifies_and_charges_once() {
+        let mut rng = rand08::thread_rng();
+        let setup = TestSetup::new(&mut rng);
+        let sealed = seal_payload(&setup, b"finalized by a process that then went away").await;
+        let total = sealed.len() as u64;
+        let dir =
+            std::env::temp_dir().join(format!("cryptify-it-{}", uuid::Uuid::new_v4().hyphenated()));
+
+        let (uuid, token) = {
+            let client = boot_with_state_db(&setup, &dir).await;
+            let (uuid, token, _) = do_init(&client, SENDER_EMAIL).await;
+            let (_, token) = do_chunk(&client, &uuid, &token, &sealed, 0).await;
+            assert_eq!(do_finalize(&client, &uuid, &token, total).await, Status::Ok);
+            (uuid, token)
+        };
+        assert_eq!(email::send_calls_for(&uuid), 1);
+
+        let client = boot_with_state_db(&setup, &dir).await;
+        assert_eq!(do_finalize(&client, &uuid, &token, total).await, Status::Ok);
+
+        assert_eq!(
+            email::send_calls_for(&uuid),
+            1,
+            "the restored session must remember it was already notified"
+        );
+        let store = client.rocket().state::<Store>().expect("Store managed");
+        let now = chrono::offset::Utc::now().timestamp();
+        assert_eq!(
+            store.get_usage(&unproven_sender_key(), now).used_bytes,
+            total,
+            "and already charged"
         );
 
         let _ = std::fs::remove_dir_all(dir);
