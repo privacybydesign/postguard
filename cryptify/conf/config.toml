@@ -24,6 +24,11 @@ pkg_url = "https://pkg.postguard.eu/"
 # unset, /metrics is publicly accessible (a startup warning is logged).
 # metrics_token = "change-me"
 
+# SQLite database for the state that has to survive a restart: each sender's
+# rolling-quota usage and the upload sessions in progress. Unset, both live in
+# memory only and a startup warning is logged. Put it on a persistent volume.
+# usage_db = "/app/state/usage.db"
+
 # Upload limits, in bytes, per tier. A caller presenting an API key that
 # pg-pkg validates gets the `api_key_*` pair; everyone else gets the default
 # pair, which `GET /limits` serves unauthenticated. Defaults are the values

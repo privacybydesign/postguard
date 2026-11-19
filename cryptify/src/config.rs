@@ -173,10 +173,30 @@ impl CryptifyConfig {
         self.metrics_token.as_deref()
     }
 
-    /// Path to the SQLite database backing rolling-quota usage, if
-    /// configured. `None` means usage is kept in memory only.
+    /// Path to cryptify's state database, if configured: the rolling-quota
+    /// usage table and the upload sessions. `None` means both are kept in
+    /// memory only.
     pub fn usage_db(&self) -> Option<&str> {
         self.usage_db.as_deref()
+    }
+
+    /// What to say at startup when no state database is configured, or `None`
+    /// when one is.
+    ///
+    /// Running without one is allowed, and it is quiet in the wrong way: the
+    /// service works, and the first restart forgets every sender's rolling
+    /// usage and 404s every upload that was in flight. Nothing about a running
+    /// instance shows which of the two it is, so it is said once, here
+    /// (postguard#321).
+    pub fn state_db_warning(&self) -> Option<&'static str> {
+        match self.usage_db {
+            Some(_) => None,
+            None => Some(
+                "usage_db is not set — rolling-quota usage and upload sessions are kept in \
+                 memory only. A restart resets every sender's usage and loses every upload in \
+                 progress. Set `usage_db` to a path on a persistent volume to keep them.",
+            ),
+        }
     }
 
     /// The attribute type carrying the sender's email in the signing
@@ -302,6 +322,22 @@ mod tests {
             .extract()
             .unwrap();
         assert_eq!(config.usage_db(), None);
+    }
+
+    #[test]
+    fn running_without_a_state_database_is_said_at_startup() {
+        let config: CryptifyConfig = Figment::from(Serialized::defaults(base_config()))
+            .extract()
+            .unwrap();
+        let warning = config
+            .state_db_warning()
+            .expect("no usage_db, so a warning");
+        assert!(warning.contains("usage_db"), "{warning}");
+
+        let mut raw = base_config();
+        raw["usage_db"] = serde_json::json!("/app/data/usage.db");
+        let config: CryptifyConfig = Figment::from(Serialized::defaults(raw)).extract().unwrap();
+        assert_eq!(config.state_db_warning(), None);
     }
 
     #[test]

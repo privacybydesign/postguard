@@ -1875,6 +1875,10 @@ async fn rocket() -> _ {
         );
     }
 
+    if let Some(warning) = config.state_db_warning() {
+        log::warn!("{warning}");
+    }
+
     // A zero window makes every recorded upload expire immediately, which
     // switches the rolling quota off without any other symptom — on a path
     // whose init and chunk PUT take no credential. Loud at startup rather
