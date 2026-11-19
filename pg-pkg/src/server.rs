@@ -137,6 +137,7 @@ pub async fn exec(server_opts: ServerOpts) -> Result<(), PKGError> {
         ibs_secret_path,
         ibs_public_path,
         allowed_origins,
+        metrics_token,
         ratelimit_disabled,
         ratelimit_per_second,
         ratelimit_burst,
@@ -144,6 +145,13 @@ pub async fn exec(server_opts: ServerOpts) -> Result<(), PKGError> {
         ratelimit_sensitive_burst,
         ratelimit_trust_forwarded_for,
     } = server_opts;
+
+    let metrics_token = handlers::MetricsToken::new(metrics_token);
+    if metrics_token.0.is_none() {
+        log::warn!(
+            "PKG metrics: no token set, so /metrics is open to anyone who can reach this server. Set --metrics-token (or PKG_METRICS_TOKEN) to require a Bearer token."
+        );
+    }
 
     let allow_any_origin = allowed_origins.iter().any(|o| o == "*");
     if allow_any_origin {
@@ -374,7 +382,8 @@ pub async fn exec(server_opts: ServerOpts) -> Result<(), PKGError> {
             )
         });
 
-        app.service(resource("/metrics").route(web::get().to(handlers::metrics)))
+        app.app_data(Data::new(metrics_token.clone()))
+            .service(resource("/metrics").route(web::get().to(handlers::metrics)))
             .service(resource("/health").route(web::get().to(handlers::health)))
             .service(v2)
     })
