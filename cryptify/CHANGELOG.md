@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.45](https://github.com/privacybydesign/postguard/compare/cryptify-v0.1.44...cryptify-v0.1.45) - 2026-11-20
+
+### Fixed
+
+- *(cryptify)* enforce the 14-day upload retention ([#494](https://github.com/privacybydesign/postguard/pull/494))
+- *(cryptify)* warn at startup when no state database is configured ([#491](https://github.com/privacybydesign/postguard/pull/491))
+- *(cryptify)* complete a finalize once ([#489](https://github.com/privacybydesign/postguard/pull/489))
+- *(cryptify)* report an unusable upload directory in /health and /metrics ([#488](https://github.com/privacybydesign/postguard/pull/488))
+
 ## [0.1.44](https://github.com/privacybydesign/postguard/compare/cryptify-v0.1.43...cryptify-v0.1.44) - 2026-11-18
 
 ### Other

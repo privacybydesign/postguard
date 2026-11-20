@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.13](https://github.com/privacybydesign/postguard/compare/pg-pkg-v0.6.12...pg-pkg-v0.6.13) - 2026-11-20
+
+### Added
+
+- *(pg-pkg)* require a bearer token on /metrics when one is configured ([#490](https://github.com/privacybydesign/postguard/pull/490))
+
 ## [0.6.12](https://github.com/privacybydesign/postguard/compare/pg-pkg-v0.6.11...pg-pkg-v0.6.12) - 2026-11-18
 
 ### Other
