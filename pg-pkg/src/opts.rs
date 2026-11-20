@@ -110,6 +110,13 @@ pub struct ServerOpts {
     )]
     pub allowed_origins: Vec<String>,
 
+    /// Bearer token that `GET /metrics` requires. When set, the endpoint
+    /// answers 401 unless the request carries `Authorization: Bearer <token>`.
+    /// When unset or empty the endpoint is open to anyone who can reach the
+    /// PKG, and the server logs a warning at startup.
+    #[clap(long, env = "PKG_METRICS_TOKEN", hide_env_values = true)]
+    pub metrics_token: Option<String>,
+
     /// Disable per-IP rate limiting on the `/v2` API. Only set this when the
     /// PKG runs behind a trusted reverse proxy that performs its own
     /// rate-limiting (per-IP limiting on the peer address is meaningless when

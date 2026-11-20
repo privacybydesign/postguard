@@ -22,6 +22,7 @@ pub enum Error {
     SessionCreationError,
     APIKeyInvalid,
     SessionTokenInvalid,
+    MetricsTokenInvalid,
 }
 
 /// Errors that can occur during setup/running of the PKG.
@@ -90,6 +91,7 @@ impl ResponseError for Error {
             Error::SessionCreationError => StatusCode::INTERNAL_SERVER_ERROR,
             Error::APIKeyInvalid => StatusCode::UNAUTHORIZED,
             Error::SessionTokenInvalid => StatusCode::BAD_REQUEST,
+            Error::MetricsTokenInvalid => StatusCode::UNAUTHORIZED,
         }
     }
 }
@@ -112,6 +114,7 @@ impl Display for Error {
             Error::SessionCreationError => write!(f, "couldn't create session"),
             Error::APIKeyInvalid => write!(f, "API key is invalid"),
             Error::SessionTokenInvalid => write!(f, "session token is malformed"),
+            Error::MetricsTokenInvalid => write!(f, "metrics token is missing or invalid"),
         }
     }
 }

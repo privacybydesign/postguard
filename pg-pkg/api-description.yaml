@@ -61,8 +61,14 @@ paths:
     get:
       tags: ["Metrics"]
       summary: "Prometheus metrics"
+      description: |
+        Open by default. When the server is started with `--metrics-token`
+        (or `PKG_METRICS_TOKEN`), the request must carry that token as
+        `Authorization: Bearer <token>`.
       operationId: "metrics"
-      security: []
+      security:
+        - {}
+        - metricsToken: []
       responses:
         "200":
           description: "Prometheus text exposition format."
@@ -70,6 +76,12 @@ paths:
             text/plain:
               schema:
                 type: string
+        "401":
+          description: "A metrics token is configured and the request did not present it."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
   /v2/parameters:
     get:
       tags: ["Parameters"]
@@ -382,6 +394,10 @@ components:
       type: http
       scheme: bearer
       description: "Business API key; the token starts with `PG-`."
+    metricsToken:
+      type: http
+      scheme: bearer
+      description: "The token the server was started with (`--metrics-token`)."
   schemas:
     Parameters:
       type: object
