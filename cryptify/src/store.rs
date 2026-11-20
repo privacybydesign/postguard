@@ -130,6 +130,17 @@ pub struct FileState {
     ///
     /// [`sender`]: FileState::sender
     pub sender_claim: Option<SenderClaim>,
+    /// Unix time at which `upload_finalize` completed for this session: the
+    /// notification went out and the upload was charged to the rolling limit.
+    /// `None` until then, including after a finalize that failed part-way.
+    ///
+    /// This is what makes finalize safe to repeat. A client retries it after a
+    /// lost response, and without a marker the handler ran to the end every
+    /// time: a second email to the recipient and a second charge for the same
+    /// bytes (postguard#375). `sender` cannot stand in for it, because it is
+    /// set before the email is attempted and a finalize that failed there has
+    /// to stay retryable.
+    pub finalized_at: Option<i64>,
 }
 
 /// Replay record of the most recently committed chunk. See
@@ -227,6 +238,9 @@ struct PersistedSession {
     /// `sender`. `None` before then, and on a row written before the column
     /// existed.
     sender_claim: Option<String>,
+    /// Verbatim copy of [`FileState::finalized_at`]. `None` on a row written
+    /// before the column existed, whatever state its session was in.
+    finalized_at: Option<i64>,
 }
 
 impl PersistedSession {
@@ -280,6 +294,7 @@ impl PersistedSession {
                     UNPROVEN_JSON.to_owned()
                 })
             }),
+            finalized_at: state.finalized_at,
         }
     }
 
@@ -371,6 +386,7 @@ impl PersistedSession {
             recovery_token_hash: self.recovery_token_hash,
             challenge: self.challenge,
             sender_claim,
+            finalized_at: self.finalized_at,
         })
     }
 }
@@ -418,7 +434,8 @@ const SESSION_COLUMNS: &str = "uuid, cryptify_token, prev_token, prev_uploaded, 
      recovery_token_hash, uploaded, expires, recipients, mail_content,
      mail_lang, confirm, notify_recipients, source_channel, client_version,
      client_app, api_key_tenant, api_key_validation_failed, sender,
-     sender_attributes, created_at, last_active_at, challenge, sender_claim";
+     sender_attributes, created_at, last_active_at, challenge, sender_claim,
+     finalized_at";
 
 fn session_from_row(row: &rusqlite::Row) -> rusqlite::Result<PersistedSession> {
     Ok(PersistedSession {
@@ -446,6 +463,7 @@ fn session_from_row(row: &rusqlite::Row) -> rusqlite::Result<PersistedSession> {
         last_active_at: row.get(21)?,
         challenge: row.get(22)?,
         sender_claim: row.get(23)?,
+        finalized_at: row.get(24)?,
     })
 }
 
@@ -466,6 +484,10 @@ const SESSION_COLUMN_MIGRATIONS: &[(&str, &str)] = &[
     (
         "sender_claim",
         "ALTER TABLE upload_sessions ADD COLUMN sender_claim TEXT",
+    ),
+    (
+        "finalized_at",
+        "ALTER TABLE upload_sessions ADD COLUMN finalized_at INTEGER",
     ),
 ];
 
@@ -518,7 +540,8 @@ impl StateDb {
                  created_at                INTEGER NOT NULL,
                  last_active_at            INTEGER NOT NULL,
                  challenge                 TEXT,
-                 sender_claim              TEXT
+                 sender_claim              TEXT,
+                 finalized_at              INTEGER
              )",
             [],
         )?;
@@ -572,11 +595,12 @@ impl StateDb {
                  recovery_token_hash, uploaded, expires, recipients, mail_content,
                  mail_lang, confirm, notify_recipients, source_channel, client_version,
                  client_app, api_key_tenant, api_key_validation_failed, sender,
-                 sender_attributes, created_at, last_active_at, challenge, sender_claim
+                 sender_attributes, created_at, last_active_at, challenge, sender_claim,
+                 finalized_at
              ) VALUES (
                  ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11,
                  ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22,
-                 ?23, ?24
+                 ?23, ?24, ?25
              )
              ON CONFLICT(uuid) DO UPDATE SET
                  cryptify_token            = excluded.cryptify_token,
@@ -600,7 +624,8 @@ impl StateDb {
                  sender_attributes         = excluded.sender_attributes,
                  last_active_at            = excluded.last_active_at,
                  challenge                 = excluded.challenge,
-                 sender_claim              = excluded.sender_claim",
+                 sender_claim              = excluded.sender_claim,
+                 finalized_at              = excluded.finalized_at",
             rusqlite::params![
                 session.uuid,
                 session.cryptify_token,
@@ -626,6 +651,7 @@ impl StateDb {
                 session.last_active_at,
                 session.challenge,
                 session.sender_claim,
+                session.finalized_at,
             ],
         ) {
             log::error!("Failed to persist upload session {}: {}", session.uuid, e);
@@ -1240,6 +1266,7 @@ mod tests {
             recovery_token_hash: String::new(),
             challenge: None,
             sender_claim: None,
+            finalized_at: None,
         }
     }
 
@@ -1503,6 +1530,7 @@ mod tests {
             recovery_token_hash: hash_recovery_token(RECOVERY_TOKEN),
             challenge: Some(CHALLENGE_HEX.to_owned()),
             sender_claim: None,
+            finalized_at: None,
         }
     }
 
@@ -1982,13 +2010,17 @@ mod tests {
             assert_eq!(state.uploaded, 17);
             assert_eq!(state.challenge, None);
             assert_eq!(state.sender_claim, None);
+            assert_eq!(state.finalized_at, None);
         }
 
         // And the added columns are writable, so a session created after the
         // migration persists its challenge into the migrated table.
-        store.create("after-migration".into(), populated_filestate());
+        let mut after = populated_filestate();
+        after.finalized_at = Some(1_700_000_123);
+        store.create("after-migration".into(), after);
         let row = read_back(db.as_str(), "after-migration").expect("row written after migration");
         assert_eq!(row.challenge.as_deref(), Some(CHALLENGE_HEX));
+        assert_eq!(row.finalized_at, Some(1_700_000_123));
     }
 
     /// Booting twice must not try to add the columns again — `ADD COLUMN` on a

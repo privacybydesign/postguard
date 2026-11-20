@@ -520,11 +520,33 @@ fn email_confirm(state: &FileState, config: &CryptifyConfig, url: &str) -> Rende
     )
 }
 
+/// Every uuid `send_email` was called for, in call order. Test builds only:
+/// the integration tests run with `staging_mode` on, where a notification is
+/// a log line, so this is the one place a test can see that an upload was
+/// notified once and not twice. Keyed by uuid because tests run in parallel
+/// and share the process.
+#[cfg(test)]
+static SEND_CALLS: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+
+/// How many times `send_email` has run for `uuid` in this process.
+#[cfg(test)]
+pub fn send_calls_for(uuid: &str) -> usize {
+    SEND_CALLS
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|sent| sent.as_str() == uuid)
+        .count()
+}
+
 pub async fn send_email(
     config: &CryptifyConfig,
     state: &FileState,
     uuid: &str,
 ) -> Result<String, Box<dyn std::error::Error>> {
+    #[cfg(test)]
+    SEND_CALLS.lock().unwrap().push(uuid.to_owned());
+
     if config.staging_mode() {
         return Ok(staging_log_email(config, state, uuid));
     }
@@ -801,6 +823,7 @@ mod tests {
             recovery_token_hash: String::new(),
             challenge: None,
             sender_claim: None,
+            finalized_at: None,
         }
     }
 

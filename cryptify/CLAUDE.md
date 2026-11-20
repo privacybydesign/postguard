@@ -189,17 +189,19 @@ Release-plz automation.
   read off `pub_id.canonical()`, not off the container's spellings: `derive_ibs`
   canonicalizes before the signature is checked, so the canonical values are the
   ones the proof actually pinned, and the raw spelling stays in `state.sender`.
-  **Finalize is repeatable, so the claim only moves one way.** Nothing marks a
-  session finalized, so a client retrying after a lost response, or resuming
-  after a refresh that lost the challenge, reaches `upload_finalize` again with
-  no header — and an unconditional assignment would recompute `Unproven` over a
-  stored `Proven`. The assignment is guarded against that: `Unproven` to
-  `Proven` still upgrades, `Proven` never degrades. Only the verification
-  produces a `Proven`, so the guard does not widen what can prove a sender. The
-  claim is the only thing on that path that is guarded: `send_email` and
-  `store.record_upload` further down the same handler still run on every
-  finalize, so a retry notifies the recipient twice and spends the sender's
-  rolling quota twice (#375).
+  **Finalize completes once.** `FileState::finalized_at` is set, and persisted,
+  after the notification has gone out and the upload has been charged to the
+  rolling limit. A client retrying after a lost response reaches
+  `upload_finalize` again, passes the token and size checks, and gets the same
+  200 without the handler running: no second email, no second charge (#375).
+  The marker is written last on purpose, so a finalize that failed at the email
+  stays retryable; `sender` is set earlier and cannot stand in for it. A
+  finalize that did not complete can still be repeated, and for that case the
+  claim only moves one way: a retry without the header must not recompute
+  `Unproven` over a stored `Proven`, so the assignment is guarded, `Unproven`
+  to `Proven` upgrades and `Proven` never degrades. Once finalize has
+  completed the claim is settled too, since the notification it would change
+  has been sent.
 - **The notification email has two renderings, and only a proof gets the tick**
   (postguard#365). `render_body` matches on the claim and constructs a
   *different template struct* per arm: `AttributedEmailTemplate` (tick,
