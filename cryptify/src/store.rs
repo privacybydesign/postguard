@@ -3,7 +3,7 @@ use crate::metrics::Metrics;
 
 use std::{
     collections::{BTreeMap, HashMap, VecDeque},
-    path::Path,
+    path::{Path, PathBuf},
     sync::Arc,
     time::Duration,
 };
@@ -12,8 +12,9 @@ use rocket::tokio::{sync::Notify, time::Instant};
 
 /// Default idle window for an in-memory upload session when no value is
 /// provided in config. Each successful chunk PUT resets it; if no activity
-/// is seen for this long the session is evicted (the on-disk file is left
-/// alone — `FileState.expires` covers that).
+/// is seen for this long the session is evicted. The file of a session that
+/// never finalized goes with it; a finalized upload's file stays until
+/// `retention` removes it.
 #[cfg(test)]
 pub const DEFAULT_UPLOAD_SESSION_IDLE_TIMEOUT_SECS: u64 = 60 * 60;
 
@@ -777,6 +778,10 @@ struct SharedState {
     /// `None` keeps both in memory only (the pre-persistence behaviour, used
     /// by unit tests and when `usage_db` is unset in config).
     db: Option<StateDb>,
+    /// Where the handlers write upload files, so evicting a session that never
+    /// finalized can take its partial file with it. Empty in unit tests that
+    /// have no upload directory, and then no file is ever touched.
+    data_dir: PathBuf,
 }
 
 pub struct Store {
@@ -810,9 +815,8 @@ impl Store {
     /// Startup is also where persisted sessions come back
     /// ([`Store::restore_sessions`]). `data_dir` is the upload directory the
     /// handlers write chunks into; the restore needs it to delete the partial
-    /// file of a session that expired while the process was down. It is
-    /// unused when `db_path` is `None`, since without a database there is
-    /// nothing to restore from.
+    /// file of a session that expired while the process was down, and the
+    /// purge task to delete the partial file of one it evicts while running.
     pub fn with_idle_ttl(
         idle_ttl: Duration,
         metrics: Arc<Metrics>,
@@ -854,6 +858,7 @@ impl Store {
                 rolling_window_secs,
                 metrics,
                 db,
+                data_dir: data_dir.to_path_buf(),
             }),
         };
 
@@ -929,7 +934,7 @@ impl Store {
             let idle_deadline = row.last_active_at.saturating_add(idle_ttl_secs);
             if now >= idle_deadline || now >= row.expires {
                 expired += 1;
-                if row.sender.is_none() {
+                if !may_have_been_delivered(&row.sender, row.finalized_at) {
                     // Never finalized: nobody can resume it and nobody can
                     // download it, so the bytes on disk are the orphan class
                     // encryption4all/cryptify#125 describes.
@@ -1106,6 +1111,21 @@ fn insert_session(state: &mut StoreState, id: String, filestate: FileState, dead
     state.expiration_keys.insert(id, (deadline, removal_id));
 }
 
+/// Whether the recipient may already hold this upload's download link, so its
+/// file has to stay for the full retention when the session goes. Shared by
+/// [`SharedState::purge_expired`] and [`Store::restore_sessions`], the two
+/// places that remove the file of a session that never finalized.
+///
+/// `finalized_at` says the notification went out. `sender` is set just
+/// before it is sent, and it is the only trace on a session finalized by a
+/// build that predates `finalized_at`. Neither does on its own: a sender whose
+/// email attribute carries no value finalizes with `sender` still `None`.
+/// Answering "maybe" too often costs disk until the retention sweep; answering
+/// "no" wrongly breaks a link the recipient was told lasts 14 days.
+fn may_have_been_delivered(sender: &Option<String>, finalized_at: Option<i64>) -> bool {
+    sender.is_some() || finalized_at.is_some()
+}
+
 fn prune_records(records: &mut VecDeque<UploadRecord>, now: i64, rolling_window_secs: i64) {
     let cutoff = now - rolling_window_secs;
     while let Some(front) = records.front() {
@@ -1129,6 +1149,7 @@ impl Drop for Store {
 impl SharedState {
     fn purge_expired(&self) -> Option<Instant> {
         let mut evicted: Vec<String> = Vec::new();
+        let mut unfinalized: Vec<String> = Vec::new();
 
         let next_deadline = {
             let mut state = self.state.lock().unwrap(); // this will only panic if we already panicked elsewhere while holding the mutex, which is fine.
@@ -1150,15 +1171,15 @@ impl SharedState {
 
                 let id = id.clone();
                 if let Some(entry) = state.files.remove(&id) {
-                    // An entry that still had no `sender` set was never finalized.
-                    // (`sender` is populated by `upload_finalize` once the file has
-                    // been unsealed.)
+                    // An entry whose link cannot have reached the recipient was
+                    // never finalized.
                     let was_unfinalized = entry
                         .try_lock()
-                        .map(|g| g.sender.is_none())
+                        .map(|g| !may_have_been_delivered(&g.sender, g.finalized_at))
                         .unwrap_or(false);
                     if was_unfinalized {
                         self.metrics.record_expired();
+                        unfinalized.push(id.clone());
                     }
                 }
                 state.expiration_keys.remove(&id);
@@ -1173,6 +1194,29 @@ impl SharedState {
         if let Some(db) = &self.db {
             for id in &evicted {
                 db.delete_session(id);
+            }
+        }
+
+        // The partial file of a session that never reached finalize. Nobody
+        // can resume it once the session is gone and nobody was ever told its
+        // address, so it is the same orphan `restore_sessions` removes for a
+        // session that expired while the process was down. A finalized
+        // upload's file is not touched here: it has to stay downloadable long
+        // after its session idles out, and `retention` removes it on expiry.
+        //
+        // A session whose lock was held at eviction counts as finalized above
+        // (`unwrap_or(false)`), so a file is never removed on a guess; the
+        // retention sweep collects that one later.
+        if !self.data_dir.as_os_str().is_empty() {
+            for id in &unfinalized {
+                match std::fs::remove_file(self.data_dir.join(id)) {
+                    Ok(()) => {}
+                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                    Err(e) => log::warn!(
+                        "Could not remove the partial upload of an evicted session: {}",
+                        e
+                    ),
+                }
             }
         }
 
@@ -1826,6 +1870,72 @@ mod tests {
         db.data_dir().join(uuid).exists()
     }
 
+    /// Wait until the purge task has evicted `id`, or give up after a second.
+    async fn evicted(store: &Store, id: &str) -> bool {
+        for _ in 0..100 {
+            if store.get(id).is_none() {
+                return true;
+            }
+            rocket::tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        false
+    }
+
+    /// The running half of what `restore_sessions` does at boot: a session
+    /// that idles out before finalize leaves nothing on disk.
+    #[rocket::async_test]
+    async fn evicting_an_unfinalized_session_removes_its_partial_file() {
+        let db = TempDbPath::new();
+        let store = store_with_db_and_ttl(&db, Duration::from_millis(20), 14 * 24 * 60 * 60);
+        write_partial(&db, "abandoned");
+        store.create("abandoned".into(), dummy_filestate());
+
+        assert!(evicted(&store, "abandoned").await);
+        // The unlink follows the eviction, outside the state lock.
+        for _ in 0..100 {
+            if !partial_exists(&db, "abandoned") {
+                break;
+            }
+            rocket::tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        assert!(!partial_exists(&db, "abandoned"));
+    }
+
+    /// A finalized upload has to outlive its session by days: the recipient
+    /// downloads it long after the hour-long idle window. Evicting the session
+    /// must leave the file to the retention sweep.
+    #[rocket::async_test]
+    async fn evicting_a_finalized_session_keeps_its_file() {
+        let db = TempDbPath::new();
+        let store = store_with_db_and_ttl(&db, Duration::from_millis(20), 14 * 24 * 60 * 60);
+        write_partial(&db, "delivered");
+        let mut finalized = dummy_filestate();
+        finalized.sender = Some("sender@example.com".into());
+        store.create("delivered".into(), finalized);
+
+        assert!(evicted(&store, "delivered").await);
+        // Long enough for an unlink to have happened if one were coming.
+        rocket::tokio::time::sleep(Duration::from_millis(100)).await;
+        assert!(partial_exists(&db, "delivered"));
+    }
+
+    /// A container whose email attribute carries no value finalizes with
+    /// `sender` still `None`, and the recipient is notified all the same.
+    /// `finalized_at` is what says so.
+    #[rocket::async_test]
+    async fn evicting_a_session_finalized_without_a_sender_keeps_its_file() {
+        let db = TempDbPath::new();
+        let store = store_with_db_and_ttl(&db, Duration::from_millis(20), 14 * 24 * 60 * 60);
+        write_partial(&db, "no-sender");
+        let mut finalized = dummy_filestate();
+        finalized.finalized_at = Some(chrono::offset::Utc::now().timestamp());
+        store.create("no-sender".into(), finalized);
+
+        assert!(evicted(&store, "no-sender").await);
+        rocket::tokio::time::sleep(Duration::from_millis(100)).await;
+        assert!(partial_exists(&db, "no-sender"));
+    }
+
     #[rocket::async_test]
     async fn a_live_session_is_restored_field_for_field() {
         let db = TempDbPath::new();
@@ -2199,6 +2309,38 @@ mod tests {
         assert!(
             partial_exists(&db, "finalized"),
             "a finalized upload's file is waiting to be downloaded for 14 days, not an orphan"
+        );
+    }
+
+    /// The boot-time half of
+    /// `evicting_a_session_finalized_without_a_sender_keeps_its_file`.
+    #[rocket::async_test]
+    async fn an_expired_session_finalized_without_a_sender_keeps_its_file() {
+        let db = TempDbPath::new();
+        {
+            let store = store_with_db(&db);
+            store.create("no-sender".into(), populated_filestate());
+            let handle = store.get("no-sender").expect("live session");
+            let mut state = handle.lock().await;
+            state.sender = None;
+            state.finalized_at = Some(chrono::offset::Utc::now().timestamp());
+            store.persist_session("no-sender", &state);
+        }
+        write_partial(&db, "no-sender");
+        backdate_last_active(
+            &db,
+            "no-sender",
+            DEFAULT_UPLOAD_SESSION_IDLE_TIMEOUT_SECS as i64 + 60,
+        );
+
+        let store = store_with_db(&db);
+        assert!(
+            store.get("no-sender").is_none(),
+            "the session still idled out"
+        );
+        assert!(
+            partial_exists(&db, "no-sender"),
+            "the recipient was notified, so the file stays for the retention"
         );
     }
 
