@@ -86,6 +86,9 @@ pub struct Metrics {
     storage_bytes: AtomicI64,
     active_files: AtomicI64,
     expired_files: AtomicU64,
+    /// 1 when the last probe of `data_dir` could create a file there, 0 when
+    /// it could not or none has run yet.
+    data_dir_writable: AtomicI64,
 }
 
 // `Default` is implemented manually (not derived) so it goes through
@@ -118,6 +121,7 @@ impl Metrics {
             storage_bytes: AtomicI64::new(0),
             active_files: AtomicI64::new(0),
             expired_files: AtomicU64::new(0),
+            data_dir_writable: AtomicI64::new(0),
         }
     }
 
@@ -149,6 +153,12 @@ impl Metrics {
     pub fn set_storage(&self, bytes: i64, active_files: i64) {
         self.storage_bytes.store(bytes, Ordering::Relaxed);
         self.active_files.store(active_files, Ordering::Relaxed);
+    }
+
+    /// Record whether `data_dir` could take a new file at the last probe.
+    pub fn set_data_dir_writable(&self, writable: bool) {
+        self.data_dir_writable
+            .store(i64::from(writable), Ordering::Relaxed);
     }
 
     /// Render all metrics in Prometheus text-exposition format.
@@ -248,6 +258,17 @@ impl Metrics {
 
         let _ = writeln!(
             out,
+            "# HELP cryptify_data_dir_writable Whether the upload directory could take a new file at the last probe (1) or not (0). While 0, cryptify_storage_bytes and cryptify_active_files hold their last good sample."
+        );
+        let _ = writeln!(out, "# TYPE cryptify_data_dir_writable gauge");
+        let _ = writeln!(
+            out,
+            "cryptify_data_dir_writable {}",
+            self.data_dir_writable.load(Ordering::Relaxed)
+        );
+
+        let _ = writeln!(
+            out,
             "# HELP cryptify_expired_files_total Uploads that expired before being finalized."
         );
         let _ = writeln!(out, "# TYPE cryptify_expired_files_total counter");
@@ -331,23 +352,46 @@ fn sanitize_label(raw: &str) -> String {
 /// Walk `data_dir` once and return `(total_bytes, file_count)`. Symlinks
 /// and subdirectories are ignored — the upload directory is a flat
 /// directory of files named by UUID.
+///
+/// A directory that cannot be read is an error, a missing one included. It
+/// used to be reported as `(0, 0)`, which is what an idle deployment reports
+/// too: on 2026-09-01 the gauges read 0 while 13.7 GB sat on a volume the
+/// process could no longer see.
 pub fn sample_storage(data_dir: &Path) -> std::io::Result<(i64, i64)> {
     let mut total: i64 = 0;
     let mut count: i64 = 0;
-    match std::fs::read_dir(data_dir) {
-        Ok(rd) => {
-            for entry in rd.flatten() {
-                if let Ok(meta) = entry.metadata() {
-                    if meta.is_file() {
-                        total = total.saturating_add(meta.len() as i64);
-                        count += 1;
-                    }
-                }
+    for entry in std::fs::read_dir(data_dir)?.flatten() {
+        if let Ok(meta) = entry.metadata() {
+            if meta.is_file() {
+                total = total.saturating_add(meta.len() as i64);
+                count += 1;
             }
-            Ok((total, count))
         }
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok((0, 0)),
-        Err(e) => Err(e),
+    }
+    Ok((total, count))
+}
+
+/// One pass of the sampler: probe `data_dir`, publish the verdict, and
+/// publish a storage sample when there is one.
+///
+/// When the directory cannot be read the storage gauges keep their last good
+/// value. Zero would be a claim that the directory is empty, and the gauge
+/// for "it is not there" is `cryptify_data_dir_writable`.
+pub fn sample_once(metrics: &Metrics, data_dir: &Path) {
+    match crate::data_dir::probe(data_dir) {
+        Ok(()) => metrics.set_data_dir_writable(true),
+        Err(e) => {
+            metrics.set_data_dir_writable(false);
+            log::error!(
+                "metrics: {:?} cannot take a new file, uploads will fail: {}",
+                data_dir,
+                e
+            );
+        }
+    }
+    match sample_storage(data_dir) {
+        Ok((bytes, count)) => metrics.set_storage(bytes, count),
+        Err(e) => log::warn!("metrics: storage sampling failed for {:?}: {}", data_dir, e),
     }
 }
 
@@ -358,10 +402,7 @@ pub async fn storage_sampler(
     interval: Duration,
 ) {
     loop {
-        match sample_storage(&data_dir) {
-            Ok((bytes, count)) => metrics.set_storage(bytes, count),
-            Err(e) => log::warn!("metrics: storage sampling failed for {:?}: {}", data_dir, e),
-        }
+        sample_once(&metrics, &data_dir);
         rocket::tokio::time::sleep(interval).await;
     }
 }
@@ -704,11 +745,35 @@ mod tests {
         assert!(text.contains("cryptify_expired_files_total 1"));
     }
 
+    /// Inverted on purpose: this test used to pin `(0, 0)` for a missing
+    /// directory, the value that hid a vanished volume for five days.
     #[test]
-    fn sample_storage_missing_dir_is_zero() {
+    fn sample_storage_missing_dir_is_an_error() {
         let tmp = std::env::temp_dir().join("cryptify-metrics-missing-xyz");
-        let (bytes, count) = sample_storage(&tmp).unwrap();
-        assert_eq!((bytes, count), (0, 0));
+        let err = sample_storage(&tmp).expect_err("a missing directory is not an empty one");
+        assert_eq!(err.kind(), std::io::ErrorKind::NotFound);
+    }
+
+    #[test]
+    fn a_vanished_data_dir_reads_as_unwritable_and_keeps_the_last_sample() {
+        let tmp = std::env::temp_dir().join(format!("cryptify-metrics-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&tmp).unwrap();
+        std::fs::write(tmp.join("a"), b"hello").unwrap();
+        let m = Metrics::new();
+
+        sample_once(&m, &tmp);
+        let text = m.render();
+        assert!(text.contains("cryptify_data_dir_writable 1"), "{text}");
+        assert!(text.contains("cryptify_storage_bytes 5"), "{text}");
+        assert!(text.contains("cryptify_active_files 1"), "{text}");
+
+        std::fs::remove_dir_all(&tmp).unwrap();
+        sample_once(&m, &tmp);
+        let text = m.render();
+        assert!(text.contains("cryptify_data_dir_writable 0"), "{text}");
+        // Not 0: nothing was observed to be empty.
+        assert!(text.contains("cryptify_storage_bytes 5"), "{text}");
+        assert!(text.contains("cryptify_active_files 1"), "{text}");
     }
 
     #[test]

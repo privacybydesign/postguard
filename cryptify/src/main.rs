@@ -1,4 +1,5 @@
 mod config;
+mod data_dir;
 mod email;
 mod error;
 mod metrics;
@@ -145,9 +146,38 @@ impl<'r> FromRequest<'r> for ClientHeaders {
     }
 }
 
+/// Answers from [`data_dir::probe`], the operation every upload starts with,
+/// and not from the fact that the process is up. A static `OK` here stayed
+/// green for five days in which every `upload_init` returned 500, because the
+/// upload directory had gone from under the running container.
+///
+/// 503 rather than a 200 with a different body, so a probe that only looks at
+/// the status code fails as it should.
 #[get("/health")]
-fn health() -> &'static str {
-    "OK"
+async fn health(
+    config: &State<CryptifyConfig>,
+) -> Result<&'static str, (rocket::http::Status, &'static str)> {
+    const UNAVAILABLE: (rocket::http::Status, &str) = (
+        rocket::http::Status::ServiceUnavailable,
+        "upload storage unavailable",
+    );
+
+    let dir = std::path::PathBuf::from(config.data_dir());
+    match rocket::tokio::task::spawn_blocking(move || data_dir::probe(&dir)).await {
+        Ok(Ok(())) => Ok("OK"),
+        Ok(Err(e)) => {
+            log::error!(
+                "health: {} cannot take a new file, uploads will fail: {}",
+                config.data_dir(),
+                e
+            );
+            Err(UNAVAILABLE)
+        }
+        Err(e) => {
+            log::error!("health: the storage probe did not finish: {}", e);
+            Err(UNAVAILABLE)
+        }
+    }
 }
 
 /// Request guard protecting `/metrics`. When `metrics_token` is configured,
@@ -2982,7 +3012,7 @@ mod tests {
         ));
 
         let rocket = rocket::custom(figment)
-            .mount("/", routes![download])
+            .mount("/", routes![download, health])
             .attach(AdHoc::config::<CryptifyConfig>());
 
         Client::tracked(rocket).await.expect("valid rocket")
@@ -2990,6 +3020,39 @@ mod tests {
 
     fn fresh_data_dir() -> std::path::PathBuf {
         std::env::temp_dir().join(format!("cryptify-dl-{}", uuid::Uuid::new_v4().hyphenated()))
+    }
+
+    // ----- /health -----
+
+    #[rocket::async_test]
+    async fn health_is_ok_while_the_upload_directory_takes_a_file() {
+        let data_dir = fresh_data_dir();
+        let client = download_client(&data_dir).await;
+
+        let res = client.get("/health").dispatch().await;
+        assert_eq!(res.status(), Status::Ok);
+        assert_eq!(res.into_string().await.as_deref(), Some("OK"));
+        assert_eq!(
+            std::fs::read_dir(&data_dir).unwrap().count(),
+            0,
+            "the probe leaves nothing behind"
+        );
+
+        let _ = std::fs::remove_dir_all(&data_dir);
+    }
+
+    /// The 2026-09-01 outage in one test: the directory goes away under a
+    /// running process, and `/health` has to say so.
+    #[rocket::async_test]
+    async fn health_is_503_once_the_upload_directory_is_gone() {
+        let data_dir = fresh_data_dir();
+        let client = download_client(&data_dir).await;
+        assert_eq!(client.get("/health").dispatch().await.status(), Status::Ok);
+
+        std::fs::remove_dir_all(&data_dir).unwrap();
+
+        let res = client.get("/health").dispatch().await;
+        assert_eq!(res.status(), Status::ServiceUnavailable);
     }
 
     #[rocket::async_test]

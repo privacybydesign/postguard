@@ -294,6 +294,36 @@
           "legendFormat": "{{env}}"
         }
       ]
+    },
+    {
+      "id": 12,
+      "type": "timeseries",
+      "title": "Upload directory writable",
+      "description": "1 while cryptify can create a file in data_dir, 0 while it cannot: the directory is gone, read-only or full, and every upload fails. While this is 0 the storage panels above hold their last good sample instead of dropping to zero. Alert on this, not on those.",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": { "h": 6, "w": 24, "x": 0, "y": 42 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "min": 0,
+          "max": 1,
+          "custom": { "drawStyle": "line", "lineInterpolation": "stepAfter", "lineWidth": 1, "fillOpacity": 10, "showPoints": "auto" }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "displayMode": "table", "placement": "right", "calcs": ["min"] },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "expr": "min by (env) (cryptify_data_dir_writable{env=~\"$env\"})",
+          "legendFormat": "{{env}}"
+        }
+      ]
     }
   ]
 }

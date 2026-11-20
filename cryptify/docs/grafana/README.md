@@ -17,6 +17,7 @@ It reads only metrics that `GET /metrics` already exports (see
 | `cryptify_storage_bytes` | gauge | none | Storage in use |
 | `cryptify_active_files` | gauge | none | Files on disk |
 | `cryptify_expired_files_total` | counter | none | Uploads expired before finalize |
+| `cryptify_data_dir_writable` | gauge | none | Upload directory writable |
 
 `channel` is `website`, `staging-website`, `outlook`, `thunderbird`, `api` or
 `unknown`; `app` is `pg-js`, `pg-dotnet`, `pg4ol`, `pg4tb` or `unknown`. Both
