@@ -934,7 +934,7 @@ impl Store {
             let idle_deadline = row.last_active_at.saturating_add(idle_ttl_secs);
             if now >= idle_deadline || now >= row.expires {
                 expired += 1;
-                if row.sender.is_none() {
+                if !may_have_been_delivered(&row.sender, row.finalized_at) {
                     // Never finalized: nobody can resume it and nobody can
                     // download it, so the bytes on disk are the orphan class
                     // encryption4all/cryptify#125 describes.
@@ -1111,6 +1111,21 @@ fn insert_session(state: &mut StoreState, id: String, filestate: FileState, dead
     state.expiration_keys.insert(id, (deadline, removal_id));
 }
 
+/// Whether the recipient may already hold this upload's download link, so its
+/// file has to stay for the full retention when the session goes. Shared by
+/// [`SharedState::purge_expired`] and [`Store::restore_sessions`], the two
+/// places that remove the file of a session that never finalized.
+///
+/// `finalized_at` says the notification went out. `sender` is set just
+/// before it is sent, and it is the only trace on a session finalized by a
+/// build that predates `finalized_at`. Neither does on its own: a sender whose
+/// email attribute carries no value finalizes with `sender` still `None`.
+/// Answering "maybe" too often costs disk until the retention sweep; answering
+/// "no" wrongly breaks a link the recipient was told lasts 14 days.
+fn may_have_been_delivered(sender: &Option<String>, finalized_at: Option<i64>) -> bool {
+    sender.is_some() || finalized_at.is_some()
+}
+
 fn prune_records(records: &mut VecDeque<UploadRecord>, now: i64, rolling_window_secs: i64) {
     let cutoff = now - rolling_window_secs;
     while let Some(front) = records.front() {
@@ -1156,12 +1171,11 @@ impl SharedState {
 
                 let id = id.clone();
                 if let Some(entry) = state.files.remove(&id) {
-                    // An entry that still had no `sender` set was never finalized.
-                    // (`sender` is populated by `upload_finalize` once the file has
-                    // been unsealed.)
+                    // An entry whose link cannot have reached the recipient was
+                    // never finalized.
                     let was_unfinalized = entry
                         .try_lock()
-                        .map(|g| g.sender.is_none())
+                        .map(|g| !may_have_been_delivered(&g.sender, g.finalized_at))
                         .unwrap_or(false);
                     if was_unfinalized {
                         self.metrics.record_expired();
@@ -1905,6 +1919,23 @@ mod tests {
         assert!(partial_exists(&db, "delivered"));
     }
 
+    /// A container whose email attribute carries no value finalizes with
+    /// `sender` still `None`, and the recipient is notified all the same.
+    /// `finalized_at` is what says so.
+    #[rocket::async_test]
+    async fn evicting_a_session_finalized_without_a_sender_keeps_its_file() {
+        let db = TempDbPath::new();
+        let store = store_with_db_and_ttl(&db, Duration::from_millis(20), 14 * 24 * 60 * 60);
+        write_partial(&db, "no-sender");
+        let mut finalized = dummy_filestate();
+        finalized.finalized_at = Some(chrono::offset::Utc::now().timestamp());
+        store.create("no-sender".into(), finalized);
+
+        assert!(evicted(&store, "no-sender").await);
+        rocket::tokio::time::sleep(Duration::from_millis(100)).await;
+        assert!(partial_exists(&db, "no-sender"));
+    }
+
     #[rocket::async_test]
     async fn a_live_session_is_restored_field_for_field() {
         let db = TempDbPath::new();
@@ -2278,6 +2309,38 @@ mod tests {
         assert!(
             partial_exists(&db, "finalized"),
             "a finalized upload's file is waiting to be downloaded for 14 days, not an orphan"
+        );
+    }
+
+    /// The boot-time half of
+    /// `evicting_a_session_finalized_without_a_sender_keeps_its_file`.
+    #[rocket::async_test]
+    async fn an_expired_session_finalized_without_a_sender_keeps_its_file() {
+        let db = TempDbPath::new();
+        {
+            let store = store_with_db(&db);
+            store.create("no-sender".into(), populated_filestate());
+            let handle = store.get("no-sender").expect("live session");
+            let mut state = handle.lock().await;
+            state.sender = None;
+            state.finalized_at = Some(chrono::offset::Utc::now().timestamp());
+            store.persist_session("no-sender", &state);
+        }
+        write_partial(&db, "no-sender");
+        backdate_last_active(
+            &db,
+            "no-sender",
+            DEFAULT_UPLOAD_SESSION_IDLE_TIMEOUT_SECS as i64 + 60,
+        );
+
+        let store = store_with_db(&db);
+        assert!(
+            store.get("no-sender").is_none(),
+            "the session still idled out"
+        );
+        assert!(
+            partial_exists(&db, "no-sender"),
+            "the recipient was notified, so the file stays for the retention"
         );
     }
 
