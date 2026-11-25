@@ -16,7 +16,8 @@ askama = "0.16.0"
 base64ct = { version = "1.5", features = ["alloc"] }
 chrono = { version = "0.4.45", features = ["unstable-locales"] }
 lettre = "0.11.22"
-log = "0.4.33"
+# `kv` lets a log call carry fields, which `src/logging.rs` writes as logfmt.
+log = { version = "0.4.33", features = ["kv"] }
 rand = "0.10.1"
 reqwest = { version = "0.13.4", features = ["blocking", "json"] }
 rocket = { version = "0.5.1", features = ["json"] }
