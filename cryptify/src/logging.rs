@@ -7,7 +7,7 @@
 //! tell an error from the rest.
 //!
 //! Here every record is one line of logfmt, and a request is the one line
-//! [`AccessLog`] writes:
+//! [`AccessLog`] writes, about the request as [`Arrival`] saw it come in:
 //!
 //! ```text
 //! level=info target=cryptify::email msg="Email sent to a@b.c"
@@ -31,7 +31,9 @@ use log::{Level, LevelFilter, Log, Metadata, Record};
 use rocket::config::LogLevel;
 use rocket::fairing::{Fairing, Info, Kind};
 use rocket::figment::Figment;
-use rocket::http::Status;
+use rocket::http::ext::IntoOwned;
+use rocket::http::uri::Origin;
+use rocket::http::{Method, Status};
 use rocket::{Data, Request, Response};
 
 /// Modules that narrate each request at info level: Rocket's request loop
@@ -239,42 +241,78 @@ fn breaks_a_word(c: char) -> bool {
     c == ' ' || c == '=' || c == '"' || c.is_control()
 }
 
-/// Logs each request as one line: method, URI, status, and the milliseconds
-/// until the response was ready to be written.
+/// What a request asked for, and when, as it arrived.
+pub(crate) struct Asked {
+    at: Instant,
+    pub(crate) method: Method,
+    pub(crate) uri: Origin<'static>,
+}
+
+impl Asked {
+    /// Read off the request the first time this is called for it, and
+    /// remembered on the request from then on.
+    pub(crate) fn of<'r>(request: &'r Request<'_>) -> &'r Asked {
+        request.local_cache(|| Asked {
+            at: Instant::now(),
+            method: request.method(),
+            uri: request.uri().clone().into_owned(),
+        })
+    }
+}
+
+/// Notes each request as it arrives, for [`AccessLog`] to log once the
+/// response is known.
+///
+/// Attach it first. rocket_cors rewrites a request it rejects into
+/// `GET /cors/<status>` in its own request fairing. Attached after that, this
+/// would note the rewritten request, and the log would not say which endpoint
+/// was asked for.
+pub struct Arrival;
+
+#[rocket::async_trait]
+impl Fairing for Arrival {
+    fn info(&self) -> Info {
+        Info {
+            name: "Access log (arrival)",
+            kind: Kind::Request,
+        }
+    }
+
+    async fn on_request(&self, request: &mut Request<'_>, _: &mut Data<'_>) {
+        Asked::of(request);
+    }
+}
+
+/// Logs each request as one line: the method and URI [`Arrival`] noted, the
+/// status, and the milliseconds until the response was ready to be written.
 ///
 /// Attach it last. Response fairings run in the order they were attached, and
 /// rocket_cors turns the 404 of a preflight into a 204 in its own; attached
 /// earlier, this would log a status the client never received.
 pub struct AccessLog;
 
-struct Started(Instant);
-
 #[rocket::async_trait]
 impl Fairing for AccessLog {
     fn info(&self) -> Info {
         Info {
             name: "Access log",
-            kind: Kind::Request | Kind::Response,
+            kind: Kind::Response,
         }
-    }
-
-    async fn on_request(&self, request: &mut Request<'_>, _: &mut Data<'_>) {
-        request.local_cache(|| Started(Instant::now()));
     }
 
     async fn on_response<'r>(&self, request: &'r Request<'_>, response: &mut Response<'r>) {
+        let asked = Asked::of(request);
         let status = response.status();
-        if is_healthy_probe(request.uri().path().as_str(), status) {
+        if is_healthy_probe(asked.uri.path().as_str(), status) {
             return;
         }
-        let elapsed = request.local_cache(|| Started(Instant::now())).0.elapsed();
 
         log::info!(
             target: ACCESS,
-            method = request.method().as_str(),
-            uri:% = request.uri(),
+            method = asked.method.as_str(),
+            uri:% = asked.uri,
             status = status.code,
-            duration_ms = u64::try_from(elapsed.as_millis()).unwrap_or(u64::MAX);
+            duration_ms = u64::try_from(asked.at.elapsed().as_millis()).unwrap_or(u64::MAX);
             "request"
         );
     }
@@ -290,7 +328,6 @@ fn is_healthy_probe(path: &str, status: Status) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rocket::http::{uri::Origin, Method};
 
     /// Whether a request for `uri` that got `status` goes unlogged.
     fn unlogged(uri: &'static str, status: Status) -> bool {

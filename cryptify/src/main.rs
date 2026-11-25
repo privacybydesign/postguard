@@ -1860,6 +1860,8 @@ pub fn build_rocket(figment: Figment, vk: Parameters<VerifyingKey>) -> Rocket<Bu
     let pkg_client = PkgClient::new(config.pkg_url().to_string());
 
     rocket
+        // First, so that it sees a request before rocket_cors can rewrite it.
+        .attach(logging::Arrival)
         .attach(cors)
         .mount("/", api_routes())
         .attach(AdHoc::config::<CryptifyConfig>())
@@ -3650,6 +3652,66 @@ mod integration {
                 );
             }
         }
+
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// What the access log reads for each request, collected by a fairing
+    /// attached after everything `build_rocket` attaches.
+    struct AskedLog(Arc<std::sync::Mutex<Vec<String>>>);
+
+    #[rocket::async_trait]
+    impl rocket::fairing::Fairing for AskedLog {
+        fn info(&self) -> rocket::fairing::Info {
+            rocket::fairing::Info {
+                name: "Asked log",
+                kind: rocket::fairing::Kind::Response,
+            }
+        }
+
+        async fn on_response<'r>(
+            &self,
+            request: &'r rocket::Request<'_>,
+            response: &mut rocket::Response<'r>,
+        ) {
+            let asked = logging::Asked::of(request);
+            self.0.lock().unwrap().push(format!(
+                "{} {} {}",
+                asked.method,
+                asked.uri,
+                response.status().code
+            ));
+        }
+    }
+
+    /// rocket_cors rewrites a request it rejects into `GET /cors/403` before
+    /// any route runs. The access log still has to name the endpoint that was
+    /// asked for, which holds only while `build_rocket` attaches
+    /// `logging::Arrival` ahead of `cors`.
+    #[rocket::async_test]
+    async fn the_access_log_names_the_endpoint_of_a_request_cors_rejects() {
+        let mut rng = rand08::thread_rng();
+        let setup = TestSetup::new(&mut rng);
+        let (figment, dir) = test_figment();
+        let figment = figment.merge(("allowed_origins", PROD_ALLOWED_ORIGINS));
+        let vk = Parameters {
+            format_version: 0,
+            public_key: VerifyingKey(setup.ibs_pk.0.clone()),
+        };
+        let asked = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let rocket = build_rocket(figment, vk).attach(AskedLog(asked.clone()));
+        let client = Client::tracked(rocket).await.expect("valid rocket");
+
+        let res = client
+            .post("/fileupload/init")
+            .header(Header::new("Origin", "https://evil.example.com"))
+            .header(ContentType::JSON)
+            .body("{}")
+            .dispatch()
+            .await;
+
+        assert_eq!(res.status(), Status::Forbidden);
+        assert_eq!(*asked.lock().unwrap(), ["POST /fileupload/init 403"]);
 
         let _ = std::fs::remove_dir_all(dir);
     }
