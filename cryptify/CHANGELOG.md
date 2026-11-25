@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.46](https://github.com/privacybydesign/postguard/compare/cryptify-v0.1.45...cryptify-v0.1.46) - 2026-11-25
+
+### Fixed
+
+- *(cryptify)* log one line of logfmt per request and none for a healthy probe ([#497](https://github.com/privacybydesign/postguard/pull/497))
+
 ## [0.1.45](https://github.com/privacybydesign/postguard/compare/cryptify-v0.1.44...cryptify-v0.1.45) - 2026-11-20
 
 ### Fixed
