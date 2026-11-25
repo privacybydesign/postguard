@@ -2,6 +2,7 @@ mod config;
 mod data_dir;
 mod email;
 mod error;
+mod logging;
 mod metrics;
 mod retention;
 mod store;
@@ -1862,6 +1863,8 @@ pub fn build_rocket(figment: Figment, vk: Parameters<VerifyingKey>) -> Rocket<Bu
         .attach(cors)
         .mount("/", api_routes())
         .attach(AdHoc::config::<CryptifyConfig>())
+        // Last, so that it logs the status the client receives.
+        .attach(logging::AccessLog)
         .manage(Store::with_idle_ttl(
             std::time::Duration::from_secs(config.session_ttl_secs()),
             metrics.clone(),
@@ -1925,6 +1928,8 @@ async fn try_fetch_verifying_key(
 #[launch]
 async fn rocket() -> _ {
     let figment = default_figment();
+    // Before the warnings below, which were dropped while no logger existed.
+    logging::init(&figment);
     let config = figment
         .extract::<CryptifyConfig>()
         .expect("Missing configuration");
