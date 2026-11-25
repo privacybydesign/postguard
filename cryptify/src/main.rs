@@ -1927,7 +1927,8 @@ async fn try_fetch_verifying_key(
 
 #[launch]
 async fn rocket() -> _ {
-    let figment = default_figment();
+    // The log is logfmt, where Rocket's colour codes would come out as text.
+    let figment = default_figment().merge((rocket::Config::CLI_COLORS, false));
     // Before the warnings below, which were dropped while no logger existed.
     logging::init(&figment);
     let config = figment

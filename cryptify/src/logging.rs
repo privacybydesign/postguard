@@ -6,21 +6,32 @@
 //! one still wrote about a hundred lines a minute, and a log viewer could not
 //! tell an error from the rest.
 //!
-//! Here every record is one line that starts with its level, and a request is
-//! one line from [`AccessLog`]. A probe that finds the service healthy is not
-//! logged at all.
+//! Here every record is one line of logfmt, and a request is the one line
+//! [`AccessLog`] writes:
+//!
+//! ```text
+//! level=info target=cryptify::email msg="Email sent to a@b.c"
+//! level=info target=access msg=request method=POST uri=/fileupload/init status=200 duration_ms=2
+//! ```
+//!
+//! A probe that finds the service healthy is not logged at all.
+//!
+//! A field given to a `log` macro, as in `log::info!(uuid = id; "finalized")`,
+//! becomes a field of the line.
 //!
 //! [`init`] runs on the launch path only. Tests build many Rockets in one
 //! process and the logger can be set once per process, so they keep Rocket's.
 
-use std::io::Write;
-use std::time::{Duration, Instant};
+use std::fmt::Write as _;
+use std::io::Write as _;
+use std::time::Instant;
 
+use log::kv::{Key, Source, Value, VisitSource};
 use log::{Level, LevelFilter, Log, Metadata, Record};
 use rocket::config::LogLevel;
 use rocket::fairing::{Fairing, Info, Kind};
 use rocket::figment::Figment;
-use rocket::http::{uri::Origin, Method, Status};
+use rocket::http::Status;
 use rocket::{Data, Request, Response};
 
 /// Modules that narrate each request at info level: Rocket's request loop
@@ -69,7 +80,12 @@ impl Log for Logger {
         let _ = writeln!(
             std::io::stdout().lock(),
             "{}",
-            line(record.level(), record.target(), &message)
+            line(
+                record.level(),
+                record.target(),
+                &message,
+                record.key_values()
+            )
         );
     }
 
@@ -118,7 +134,7 @@ fn narrates_a_request(metadata: &Metadata<'_>) -> bool {
 /// with its built-in error page. The status on the access line says both.
 ///
 /// rocket_cors answers every preflight through that path, turning the 404
-/// into a 204. Left in, and now with a level in front, each upload from a
+/// into a 204. Left in, and now with a level on the line, each upload from a
 /// browser would read as an error.
 ///
 /// These two are matched on Rocket 0.5's wording, because the same target
@@ -139,8 +155,9 @@ fn is_within(target: &str, module: &str) -> bool {
         .is_some_and(|rest| rest.is_empty() || rest.starts_with("::"))
 }
 
-/// One record as one line: the level, where it came from, the message.
-fn line(level: Level, target: &str, message: &str) -> String {
+/// One record as one line of logfmt: the level, where it came from, the
+/// message, and then the fields the record carries.
+fn line(level: Level, target: &str, message: &str, fields: &dyn Source) -> String {
     let (target, marker) = match target.strip_suffix(CONTINUATION) {
         Some(parent) => (parent, ">> "),
         None => (target, ""),
@@ -150,15 +167,80 @@ fn line(level: Level, target: &str, message: &str) -> String {
     } else {
         level
     };
-    // A message that spans lines would reach a log collector as that many
-    // separate entries, only the first of them carrying the level.
-    let message = message.replace('\n', "\\n");
 
-    format!("{level:<5} {target}: {marker}{message}")
+    let mut line = Line(String::new());
+    line.field("level", level_name(level));
+    line.field("target", target);
+    line.field("msg", &format!("{marker}{message}"));
+    // `Line` accepts every pair, so the visit cannot fail.
+    let _ = fields.visit(&mut line);
+    line.0
 }
 
-/// Logs each request as one line: method, URI, status, and the time until the
-/// response was ready to be written.
+/// Lowercase, which is what a log collector looks for in a `level` field.
+fn level_name(level: Level) -> &'static str {
+    match level {
+        Level::Error => "error",
+        Level::Warn => "warn",
+        Level::Info => "info",
+        Level::Debug => "debug",
+        Level::Trace => "trace",
+    }
+}
+
+/// A line of logfmt being written.
+struct Line(String);
+
+impl Line {
+    /// Appends `key=value`. A value that a logfmt reader would split, or stop
+    /// at, is quoted. That also keeps a message that spans lines on one line,
+    /// because a newline in a quoted value is written as `\n`.
+    fn field(&mut self, key: &str, value: &str) {
+        if !self.0.is_empty() {
+            self.0.push(' ');
+        }
+        // A key cannot be quoted, so what would break it is replaced.
+        self.0
+            .extend(key.chars().map(|c| if breaks_a_word(c) { '_' } else { c }));
+        self.0.push('=');
+
+        if !value.is_empty() && !value.chars().any(breaks_a_word) {
+            self.0.push_str(value);
+            return;
+        }
+
+        self.0.push('"');
+        for c in value.chars() {
+            match c {
+                '"' => self.0.push_str("\\\""),
+                '\\' => self.0.push_str("\\\\"),
+                '\n' => self.0.push_str("\\n"),
+                '\r' => self.0.push_str("\\r"),
+                '\t' => self.0.push_str("\\t"),
+                c if c.is_control() => {
+                    let _ = write!(self.0, "\\u{:04x}", u32::from(c));
+                }
+                c => self.0.push(c),
+            }
+        }
+        self.0.push('"');
+    }
+}
+
+impl<'kvs> VisitSource<'kvs> for Line {
+    fn visit_pair(&mut self, key: Key<'kvs>, value: Value<'kvs>) -> Result<(), log::kv::Error> {
+        self.field(key.as_str(), &value.to_string());
+        Ok(())
+    }
+}
+
+/// Whether `c` ends an unquoted logfmt key or value, or is not allowed in one.
+fn breaks_a_word(c: char) -> bool {
+    c == ' ' || c == '=' || c == '"' || c.is_control()
+}
+
+/// Logs each request as one line: method, URI, status, and the milliseconds
+/// until the response was ready to be written.
 ///
 /// Attach it last. Response fairings run in the order they were attached, and
 /// rocket_cors turns the 404 of a preflight into a 204 in its own; attached
@@ -181,95 +263,66 @@ impl Fairing for AccessLog {
     }
 
     async fn on_response<'r>(&self, request: &'r Request<'_>, response: &mut Response<'r>) {
+        let status = response.status();
+        if is_healthy_probe(request.uri().path().as_str(), status) {
+            return;
+        }
         let elapsed = request.local_cache(|| Started(Instant::now())).0.elapsed();
 
-        if let Some(line) = access_line(request.method(), request.uri(), response.status(), elapsed)
-        {
-            log::info!(target: ACCESS, "{line}");
-        }
+        log::info!(
+            target: ACCESS,
+            method = request.method().as_str(),
+            uri:% = request.uri(),
+            status = status.code,
+            duration_ms = u64::try_from(elapsed.as_millis()).unwrap_or(u64::MAX);
+            "request"
+        );
     }
 }
 
-/// The line for one request, or `None` for a probe that found the service
-/// healthy. An unhealthy probe is logged like any other request, next to the
+/// A probe that found the service healthy: the one request that is not
+/// logged. An unhealthy probe is logged like any other request, next to the
 /// error `health` itself writes.
-fn access_line(
-    method: Method,
-    uri: &Origin<'_>,
-    status: Status,
-    elapsed: Duration,
-) -> Option<String> {
-    if uri.path() == HEALTH_PATH && status.class().is_success() {
-        return None;
-    }
-
-    Some(format!(
-        "{method} {uri} {} {}ms",
-        status.code,
-        elapsed.as_millis()
-    ))
+fn is_healthy_probe(path: &str, status: Status) -> bool {
+    path == HEALTH_PATH && status.class().is_success()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rocket::http::{uri::Origin, Method};
 
-    fn uri(s: &'static str) -> Origin<'static> {
-        Origin::parse(s).unwrap()
+    /// Whether a request for `uri` that got `status` goes unlogged.
+    fn unlogged(uri: &'static str, status: Status) -> bool {
+        is_healthy_probe(Origin::parse(uri).unwrap().path().as_str(), status)
     }
 
     fn narrated(level: Level, target: &str) -> bool {
         narrates_a_request(&Metadata::builder().level(level).target(target).build())
     }
 
+    /// A record that carries no fields of its own.
+    fn rendered(level: Level, target: &str, message: &str) -> String {
+        let no_fields: [(&str, Value<'_>); 0] = [];
+        line(level, target, message, &no_fields)
+    }
+
     #[test]
     fn a_healthy_probe_is_not_logged() {
-        let took = Duration::from_millis(1);
-
-        assert_eq!(
-            access_line(Method::Get, &uri("/health"), Status::Ok, took),
-            None
-        );
-        assert_eq!(
-            access_line(Method::Get, &uri("/health?from=kubelet"), Status::Ok, took),
-            None
-        );
+        assert!(unlogged("/health", Status::Ok));
+        assert!(unlogged("/health?from=kubelet", Status::Ok));
     }
 
     #[test]
     fn an_unhealthy_probe_is_logged() {
-        assert_eq!(
-            access_line(
-                Method::Get,
-                &uri("/health"),
-                Status::ServiceUnavailable,
-                Duration::from_millis(7)
-            )
-            .as_deref(),
-            Some("GET /health 503 7ms")
-        );
+        assert!(!unlogged("/health", Status::ServiceUnavailable));
     }
 
     #[test]
-    fn any_other_request_is_one_line() {
-        assert_eq!(
-            access_line(
-                Method::Post,
-                &uri("/fileupload/init"),
-                Status::Ok,
-                Duration::from_millis(12)
-            )
-            .as_deref(),
-            Some("POST /fileupload/init 200 12ms")
-        );
+    fn any_other_request_is_logged() {
+        assert!(!unlogged("/fileupload/init", Status::Ok));
         // A path that only starts like the health route is not the probe.
-        assert!(access_line(
-            Method::Get,
-            &uri("/healthz"),
-            Status::NotFound,
-            Duration::ZERO
-        )
-        .is_some());
+        assert!(!unlogged("/healthz", Status::Ok));
     }
 
     /// `HEALTH_PATH` is a second copy of the path in `#[get("/health")]`. If
@@ -296,7 +349,7 @@ mod tests {
     fn a_warning_from_the_request_loop_is_kept() {
         // `Received SIGTERM. Requesting shutdown.`
         assert!(!narrated(Level::Warn, "rocket::server"));
-        // `No matching routes for GET /nope.`
+        // `Handler upload_chunk panicked.`
         assert!(!narrated(Level::Error, "rocket::server::_"));
         // `CORS Error: ...`
         assert!(!narrated(Level::Error, "rocket_cors::_"));
@@ -342,50 +395,98 @@ mod tests {
     }
 
     #[test]
-    fn a_line_starts_with_its_level() {
+    fn a_record_is_level_target_and_message() {
         assert_eq!(
-            line(Level::Info, "cryptify::email", "Email sent to a@b.c"),
-            "INFO  cryptify::email: Email sent to a@b.c"
+            rendered(Level::Info, "cryptify::email", "Email sent to a@b.c"),
+            r#"level=info target=cryptify::email msg="Email sent to a@b.c""#
         );
         assert_eq!(
-            line(Level::Error, "cryptify", "health: probe failed"),
-            "ERROR cryptify: health: probe failed"
+            rendered(Level::Error, "cryptify", "failed"),
+            "level=error target=cryptify msg=failed"
+        );
+    }
+
+    #[test]
+    fn the_fields_of_a_record_follow_the_message() {
+        let fields = [
+            ("method", Value::from("POST")),
+            ("uri", Value::from("/fileupload/init")),
+            ("status", Value::from(200u16)),
+            ("duration_ms", Value::from(12u64)),
+        ];
+
+        assert_eq!(
+            line(Level::Info, ACCESS, "request", &fields),
+            "level=info target=access msg=request \
+             method=POST uri=/fileupload/init status=200 duration_ms=12"
+        );
+    }
+
+    #[test]
+    fn a_value_a_reader_would_split_is_quoted() {
+        // The one route with a query: `=` would start a second pair.
+        let fields = [("uri", Value::from("/usage?email=a@b.c"))];
+        assert_eq!(
+            line(Level::Info, ACCESS, "request", &fields),
+            r#"level=info target=access msg=request uri="/usage?email=a@b.c""#
+        );
+
+        assert_eq!(
+            rendered(Level::Warn, "cryptify", r#"got "x\y""#),
+            r#"level=warn target=cryptify msg="got \"x\\y\"""#
+        );
+        assert_eq!(
+            rendered(Level::Info, "cryptify", ""),
+            r#"level=info target=cryptify msg="""#
+        );
+    }
+
+    #[test]
+    fn a_message_that_spans_lines_stays_one_line() {
+        let line = rendered(
+            Level::Debug,
+            "rocket::server",
+            "Request {\n    method: GET,\n}",
+        );
+
+        assert_eq!(
+            line,
+            r#"level=debug target=rocket::server msg="Request {\n    method: GET,\n}""#
+        );
+        assert!(!line.contains('\n'));
+    }
+
+    #[test]
+    fn a_key_cannot_break_the_line() {
+        let fields = [("upload id", Value::from(7u8))];
+
+        assert_eq!(
+            line(Level::Info, "cryptify", "stored", &fields),
+            "level=info target=cryptify msg=stored upload_id=7"
         );
     }
 
     #[test]
     fn a_continuation_line_is_marked() {
         assert_eq!(
-            line(
+            rendered(
                 Level::Warn,
                 "rocket::server::_",
-                "No 404 catcher registered."
+                "Remote left: broken pipe."
             ),
-            "WARN  rocket::server: >> No 404 catcher registered."
+            r#"level=warn target=rocket::server msg=">> Remote left: broken pipe.""#
         );
     }
 
     #[test]
     fn the_launch_report_is_info_even_where_rocket_sends_it_as_a_warning() {
         assert_eq!(
-            line(Level::Warn, "rocket::launch", "Rocket has launched"),
-            "INFO  rocket::launch: Rocket has launched"
+            rendered(Level::Warn, "rocket::launch", "Rocket has launched"),
+            r#"level=info target=rocket::launch msg="Rocket has launched""#
         );
         assert_eq!(
-            line(Level::Warn, "rocket::launch::_", "address: 0.0.0.0"),
-            "INFO  rocket::launch: >> address: 0.0.0.0"
-        );
-    }
-
-    #[test]
-    fn a_message_that_spans_lines_stays_one_line() {
-        assert_eq!(
-            line(
-                Level::Debug,
-                "rocket::server",
-                "Request {\n    method: GET,\n}"
-            ),
-            "DEBUG rocket::server: Request {\\n    method: GET,\\n}"
+            rendered(Level::Warn, "rocket::launch::_", "address: 0.0.0.0"),
+            r#"level=info target=rocket::launch msg=">> address: 0.0.0.0""#
         );
     }
 
